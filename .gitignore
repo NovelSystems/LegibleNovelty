@@ -141,3 +141,11 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# --- Legible Novelty additions ---
+# Optional TLS-inspecting-proxy CA injected into the Docker build context in
+# some sandboxed/corporate environments. Never commit it.
+/ca-bundle.crt
+
+# Docker-related local state
+docker-compose.override.yml

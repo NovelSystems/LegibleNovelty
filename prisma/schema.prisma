@@ -1,0 +1,35 @@
+// Legible Novelty — Prisma schema (Stage 0).
+//
+// Stage 0 scope: nothing beyond the minimal models needed to prove the Auth.js
+// database-session adapter works end to end against the dockerized Postgres.
+// The real Account model, Seeds, Modules, etc. arrive in later stages. The
+// User and Session tables below are the Auth.js adapter's own tables, and are
+// the only models required to create and revoke a database-backed session.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  // Shadow database used by `prisma migrate dev` (Stage 1's workflow).
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  sessions      Session[]
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

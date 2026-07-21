@@ -1,0 +1,12 @@
+# Keep the build context small and never bake host state / secrets into the
+# image. Note: ca-bundle.crt is intentionally NOT ignored — the Dockerfile's
+# optional CA block needs it in the context when present.
+node_modules
+.next
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
