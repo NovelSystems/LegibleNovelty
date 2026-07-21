@@ -1,0 +1,77 @@
+# Legible Novelty — Stage 0 local development environment.
+#
+# Three services: postgres (session/app store), app (Node.js), mailpit (local
+# email catcher). Everything is fully local and zero-cost. Connection details
+# for postgres are driven entirely by environment variables so that swapping in
+# a managed Postgres instance later is a config change, not a re-architecture.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      # UTF-8 from day one: non-Latin scripts appear in module content from
+      # launch, so this is not a "later" concern.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      # Persistent named volume so data survives container restarts.
+      - postgres_data:/var/lib/postgresql/data
+      # Provisions the shadow (prisma migrate dev) and test databases on a
+      # fresh data directory.
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    # Exposed only to other services on the compose network, not the host.
+    # (Add a `ports:` mapping here if you want direct host DB access for
+    # debugging.)
+    expose:
+      - "5432"
+    # Explicit healthcheck — check.sh's `docker compose up -d --wait postgres`
+    # depends on this existing.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    volumes:
+      # Bind-mount the project for live code reload during development...
+      - .:/app
+      # ...but layer a named volume over node_modules so the host mount does
+      # not shadow the dependencies (and generated Prisma Client) that the
+      # image built. Tradeoff: after changing dependencies you must rebuild
+      # (`docker compose down -v` + rebuild), not just restart.
+      - node_modules:/app/node_modules
+    command: pnpm run dev
+
+  mailpit:
+    image: axllent/mailpit
+    restart: unless-stopped
+    ports:
+      # Web UI, exposed to the host for manual inspection during dev.
+      - "8025:8025"
+    expose:
+      # SMTP, internal — the app sends to mailpit:1025 over the compose network.
+      - "1025"
+    # No custom healthcheck needed: the official image ships one built in
+    # (a native `readyz` subcommand), so `--wait mailpit` works as-is.
+
+volumes:
+  postgres_data:
+  node_modules:
