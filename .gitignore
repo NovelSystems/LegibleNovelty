@@ -149,3 +149,6 @@ vite.config.ts.timestamp-*
 
 # Docker-related local state
 docker-compose.override.yml
+
+# Next.js generated type declarations (regenerated on dev/build)
+next-env.d.ts
