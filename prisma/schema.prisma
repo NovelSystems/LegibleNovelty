@@ -1,10 +1,20 @@
-// Legible Novelty — Prisma schema (Stage 0).
+// Legible Novelty — Prisma schema (Stage 1: User Management).
 //
-// Stage 0 scope: nothing beyond the minimal models needed to prove the Auth.js
-// database-session adapter works end to end against the dockerized Postgres.
-// The real Account model, Seeds, Modules, etc. arrive in later stages. The
-// User and Session tables below are the Auth.js adapter's own tables, and are
-// the only models required to create and revoke a database-backed session.
+// Stage 1 replaces Stage 0's placeholder `User`/`Session` proof-of-concept with
+// the platform's real identity substrate: the `Account` model and everything
+// User Management owns (subsystem 4 in the master design's Section 22 map).
+//
+// Field names are snake_case to match the Stage 1 brief's schema tables
+// verbatim (so the DB columns — including the indexed `email_hash` and
+// `display_name_hash` — are named exactly as specified). Prisma model names
+// stay PascalCase.
+//
+// Design note on identity: the brief's Account table lists `email_hash` and
+// `password_hash` but no plaintext `email` column, while Task 3's purge split
+// ("plaintext email ... deleted on purge") and Task 10's transactional email
+// triggers both require an actual address for active accounts. We therefore
+// carry a nullable plaintext `email` (nulled at purge) ALONGSIDE the permanent
+// `email_hash`. This omission-vs-requirement is flagged in the delivery summary.
 
 generator client {
   provider = "prisma-client-js"
@@ -13,23 +23,407 @@ generator client {
 datasource db {
   provider          = "postgresql"
   url               = env("DATABASE_URL")
-  // Shadow database used by `prisma migrate dev` (Stage 1's workflow).
+  // Shadow database used by `prisma migrate dev`.
   shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
-model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String?   @unique
-  emailVerified DateTime?
-  image         String?
-  sessions      Session[]
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  Community_Member
+  Verified_Educator
+  Moderator
+  System_Admin
 }
 
+enum AccountStatus {
+  active
+  deactivated
+  purged
+}
+
+enum ConnectionStatus {
+  requested
+  accepted
+}
+
+enum ConnectionCreatedVia {
+  request
+  invite_link_autoaccept
+}
+
+enum ApprovalType {
+  one_time_pass
+  standing_connection
+}
+
+enum ApprovalStatus {
+  pending
+  approved
+  denied
+}
+
+enum VerificationPath {
+  k12_professor
+  license_holder
+}
+
+enum VerificationStatus {
+  pending
+  approved
+  rejected
+}
+
+// Captured on every VE rejection regardless of Phase 1/2 — the training signal
+// Phase 2's AI screening will eventually need (brief Task 6 / Section 4.1).
+enum RejectionReasonCode {
+  not_in_directory
+  document_illegible
+  document_inconsistent
+  registry_mismatch
+  other
+}
+
+enum FlagType {
+  bad_peer_token_grant
+  ve_conduct_review
+}
+
+enum FlagStatus {
+  pending
+  confirmed
+  dismissed
+}
+
+enum AwardTargetType {
+  account
+  seed
+  module
+}
+
+// Purpose of a short-lived, single-use token (email verification on signup,
+// ordinary password reset, and the purged-account reclaim proof-of-control).
+enum AccountTokenType {
+  email_verification
+  password_reset
+  reclaim
+}
+
+// ---------------------------------------------------------------------------
+// Account — the platform's real identity model (brief Task 1)
+// ---------------------------------------------------------------------------
+
+model Account {
+  account_id String @id @default(uuid()) // Retained in the clear even post-purge.
+
+  role Role @default(Community_Member)
+  // Moderator / System_Admin assignment is manual/DB-only in Stage 1 — no admin
+  // UI exists yet (stated limitation, not an oversight).
+
+  // Required at creation for every account (enforced in application logic, since
+  // Task 1 mandates it). Nullable at the column level ONLY because Task 3.5's
+  // purge split deletes date of birth — the two requirements are reconciled by
+  // making the column nullable and enforcing presence on create. Flagged in the
+  // delivery summary as a Task 1 vs. Task 3.5 tension resolved this way.
+  date_of_birth   DateTime?
+  is_child_subaccount Boolean @default(false)
+  parent_account_id   String?  // Set only for child sub-accounts.
+  parent  Account?  @relation("ParentChild", fields: [parent_account_id], references: [account_id])
+  children Account[] @relation("ParentChild")
+
+  // Stored base grade + the date it was last set. Effective grade is computed
+  // lazily at read time by counting mid-August rollovers since the anchor (see
+  // lib/grade.ts and Open Items — scheduling mechanism deliberately NOT a job).
+  grade       Int?
+  grade_anchor_date DateTime?
+
+  country String? // Child public identity: "A [grade] learner from [Country]".
+
+  preferred_display_name    String?
+  legal_name                String
+  display_name_use_preferred Boolean @default(false)
+  // Blocks reuse of any purged handle platform-wide — checked on EVERY display
+  // name assignment (signup, rename, reclaim), not only reclaim.
+  display_name_hash String? @map("display_name_hash")
+
+  // Generated at purge time (not creation); opaque, not derivable from id/email.
+  purged_pseudonymous_identifier String?
+
+  // Plaintext email of an active account (nulled at purge). See header note.
+  email          String?  @unique
+  email_verified DateTime? // Auth-adapter compatible verification timestamp.
+  // Permanent, irreversible; reclaim-flow lookup. Indexed from day one.
+  email_hash    String?
+  // Retained post-purge (reclaim-flow use only; not a usable credential alone).
+  password_hash String?
+
+  account_status AccountStatus @default(active)
+  deactivated_at DateTime?
+  purged_at      DateTime?
+
+  // Priority routing / homepage defaults for later subsystems; unused in Stage 1.
+  language_preference String[] @default([])
+  interest_domains    String[] @default([])
+
+  // Notification opt-outs by category (Task 10). Security-critical categories
+  // (email verification, password reset) are never consulted here. Granular
+  // category UI is deferred, but the storage does not preclude it.
+  notification_opt_outs String[] @default([])
+
+  // VE state (brief Task 6/7).
+  ve_status               Boolean @default(false)
+  ve_granted_by_account_id String? // Convenience pointer; TokenGrant is the SoR.
+  ve_granted_by  Account?  @relation("VeGrantedBy", fields: [ve_granted_by_account_id], references: [account_id])
+  ve_granted     Account[] @relation("VeGrantedBy")
+  ve_token_available Boolean @default(false) // Every VE holds exactly 1 at a time.
+
+  // Columns only populated by later stages (kept real now per brief Task 1).
+  lnc_status                   Boolean @default(false) // Certification Center (later).
+  fotl_status                  Boolean @default(false) // Payments & Billing (later).
+  veframework_onboarding_passed Boolean @default(false) // Placeholder gate; mechanism out of scope.
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations (back-references).
+  sessions       Session[]
+  tokens         AccountToken[]
+  connections_a  Connection[]  @relation("ConnectionA")
+  connections_b  Connection[]  @relation("ConnectionB")
+  parent_approvals_as_child  ParentApproval[] @relation("ApprovalChild")
+  parent_approvals_as_adult  ParentApproval[] @relation("ApprovalAdult")
+  verification_applications  VerificationApplication[] @relation("ApplicationApplicant")
+  reviewed_applications      VerificationApplication[] @relation("ApplicationReviewer")
+  tokens_granted   TokenGrant[] @relation("GrantGranter")
+  tokens_received  TokenGrant[] @relation("GrantRecipient")
+  flags            AccountFlag[] @relation("FlagAccount")
+  flags_reviewed   AccountFlag[] @relation("FlagReviewer")
+  token_request_threads TokenRequestThread[]
+  award_nominations AwardNomination[]
+  awards_won        AwardInstance[]
+
+  // email_hash and display_name_hash are the two indexed lookup columns the
+  // brief requires (reclaim / reuse-blocking hit them on every signup).
+  @@index([email_hash])
+  @@index([display_name_hash])
+}
+
+// ---------------------------------------------------------------------------
+// Session — database-backed sessions (Auth.js, Account-scoped). Replaces the
+// Stage 0 User-scoped Session. Login creates a row; logout deletes it.
+// ---------------------------------------------------------------------------
+
 model Session {
-  id           String   @id @default(cuid())
-  sessionToken String   @unique
-  userId       String
-  expires      DateTime
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id            String   @id @default(uuid())
+  session_token String   @unique
+  account_id    String
+  account       Account  @relation(fields: [account_id], references: [account_id], onDelete: Cascade)
+  expires       DateTime
+}
+
+// Single-use tokens for email verification, password reset, and reclaim proof.
+model AccountToken {
+  id         String           @id @default(uuid())
+  token      String           @unique
+  type       AccountTokenType
+  account_id String
+  account    Account          @relation(fields: [account_id], references: [account_id], onDelete: Cascade)
+  // For reclaim: the address the person is proving control of (may differ from
+  // the purged account's original address, which is no longer stored plaintext).
+  target_email String?
+  expires    DateTime
+  consumed_at DateTime?
+  created_at DateTime @default(now())
+
+  @@index([account_id])
+}
+
+// Permanent blocklist of retired (purged) display-name hashes.
+//
+// A single `Account.display_name_hash` column cannot on its own keep a purged
+// handle blocked forever: once that same row is reclaimed and given a NEW
+// display name (brief Task 3 reclaim), its `display_name_hash` is overwritten,
+// which would silently un-block the old handle. This table accumulates purged
+// handles permanently so the platform-wide reuse check survives reclaim. The
+// reuse check (lib/accounts.ts) unions active accounts' current
+// `display_name_hash` with these retired hashes. Flagged in the delivery
+// summary as an addition beyond Task 1's field list, required to actually make
+// "permanently blocked from reuse" hold.
+model RetiredDisplayName {
+  hash       String   @id
+  retired_at DateTime @default(now())
+}
+
+// Auth.js email-provider verification tokens (kept for adapter compatibility
+// with the Stage 0 Nodemailer provider configuration).
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------------------------------------------------------------------------
+// Connection & ParentApproval (brief Task 4)
+// ---------------------------------------------------------------------------
+
+model Connection {
+  connection_id String               @id @default(uuid())
+  account_a_id  String
+  account_a     Account              @relation("ConnectionA", fields: [account_a_id], references: [account_id])
+  account_b_id  String
+  account_b     Account              @relation("ConnectionB", fields: [account_b_id], references: [account_id])
+  status        ConnectionStatus     @default(requested)
+  created_via   ConnectionCreatedVia @default(request)
+  created_at    DateTime             @default(now())
+
+  @@index([account_a_id])
+  @@index([account_b_id])
+}
+
+model ParentApproval {
+  approval_id                String         @id @default(uuid())
+  child_account_id           String
+  child_account              Account        @relation("ApprovalChild", fields: [child_account_id], references: [account_id])
+  requesting_adult_account_id String
+  requesting_adult           Account        @relation("ApprovalAdult", fields: [requesting_adult_account_id], references: [account_id])
+  approval_type              ApprovalType
+  // Soft reference: LessonPlan doesn't exist yet (Workshop subsystem). Plain
+  // UUID now; a real FK constraint is added by a later migration once Workshop
+  // ships LessonPlan. Set only for one_time_pass.
+  lesson_plan_id             String?
+  status                     ApprovalStatus @default(pending)
+  created_at                 DateTime       @default(now())
+
+  @@index([child_account_id])
+  @@index([requesting_adult_account_id])
+}
+
+// ---------------------------------------------------------------------------
+// Verified Educator verification (brief Task 6)
+// ---------------------------------------------------------------------------
+
+model VerificationApplication {
+  application_id       String              @id @default(uuid())
+  applicant_account_id String
+  applicant            Account             @relation("ApplicationApplicant", fields: [applicant_account_id], references: [account_id])
+  path                 VerificationPath
+  status               VerificationStatus  @default(pending)
+  reviewer_account_id  String?
+  reviewer             Account?            @relation("ApplicationReviewer", fields: [reviewer_account_id], references: [account_id])
+  // Rejection reason is a structured code plus optional free-text elaboration
+  // (not a bare string) — captured on every rejection, every path.
+  rejection_reason_code        RejectionReasonCode?
+  rejection_reason_elaboration String?
+  submitted_document_ref       String? // license_holder path only.
+  directory_lookup_confirmed   Boolean? // Set by the human reviewer.
+  created_at DateTime  @default(now())
+  decided_at DateTime?
+
+  @@index([applicant_account_id])
+  @@index([status])
+}
+
+model TokenGrant {
+  grant_id            String    @id @default(uuid())
+  granting_account_id String
+  granting_account    Account   @relation("GrantGranter", fields: [granting_account_id], references: [account_id])
+  recipient_account_id String
+  recipient_account    Account  @relation("GrantRecipient", fields: [recipient_account_id], references: [account_id])
+  granted_at   DateTime  @default(now())
+  refreshed_at DateTime? // Set 1 month after use (token refresh rule).
+
+  flags AccountFlag[] @relation("FlagTokenGrant")
+
+  @@index([granting_account_id])
+  @@index([recipient_account_id])
+}
+
+// PROVISIONAL STAND-IN (brief Task 6 / Open Items). This is a narrow,
+// purpose-built table for the VE token-request subforum ONLY. It is a
+// deliberate, temporary stopgap for the future shared Post/Comment model with a
+// `thread_type` discriminator (Communication subsystem, deferred). It must be
+// consolidated into that shared model once Communication ships — it is NOT a
+// permanent parallel system. The rationale auto-posts publicly as a new thread
+// at the moment of application; the applicant has no other subforum access
+// until a token is granted.
+model TokenRequestThread {
+  thread_id            String   @id @default(uuid())
+  applicant_account_id String
+  applicant            Account  @relation(fields: [applicant_account_id], references: [account_id])
+  rationale            String // Auto-posted publicly at creation.
+  created_at           DateTime @default(now())
+
+  @@index([applicant_account_id])
+}
+
+// ---------------------------------------------------------------------------
+// Peer token accountability (brief Task 7)
+// ---------------------------------------------------------------------------
+
+model AccountFlag {
+  flag_id    String     @id @default(uuid())
+  // Meaning of the flagged account differs by flag_type:
+  //  - bad_peer_token_grant: the GRANTING educator.
+  //  - ve_conduct_review:    the educator whose own conduct is under review.
+  account_id String
+  account    Account    @relation("FlagAccount", fields: [account_id], references: [account_id])
+  flag_type  FlagType
+  // Populated for bad_peer_token_grant only; the specific disputed grant.
+  related_token_grant_id String?
+  related_token_grant    TokenGrant? @relation("FlagTokenGrant", fields: [related_token_grant_id], references: [grant_id])
+  status     FlagStatus @default(pending)
+  reason     String
+  reviewed_by String?
+  reviewer    Account?   @relation("FlagReviewer", fields: [reviewed_by], references: [account_id])
+  created_at  DateTime   @default(now())
+  resolved_at DateTime?
+
+  @@index([account_id])
+  @@index([flag_type])
+}
+
+// ---------------------------------------------------------------------------
+// Awards — backend schema ONLY (brief Task 9). No user-facing surface reads or
+// writes these in Stage 1.
+// ---------------------------------------------------------------------------
+
+model AwardCategory {
+  category_id            String          @id @default(uuid())
+  name                   String
+  attachment_target_type AwardTargetType
+  // Deliberately deferred pending platform activity data — left nullable, no
+  // placeholder value invented (Open Items).
+  eligibility_threshold  Int?
+  is_cyclical            Boolean         @default(false)
+
+  instances AwardInstance[]
+}
+
+model AwardInstance {
+  instance_id String        @id @default(uuid())
+  category_id String
+  category    AwardCategory @relation(fields: [category_id], references: [category_id])
+  cycle_label String? // e.g. "2026", only for cyclical categories.
+  target_id   String // The seed/module/account that won.
+  winning_creator_account_id String?
+  winning_creator            Account? @relation(fields: [winning_creator_account_id], references: [account_id])
+  date_granted DateTime @default(now())
+
+  @@index([category_id])
+}
+
+model AwardNomination {
+  nomination_id         String  @id @default(uuid())
+  nominator_account_id  String
+  nominator             Account @relation(fields: [nominator_account_id], references: [account_id])
+  target_id             String
+  rationale             String // Required.
+  adjudicated_by        String? // Moderator, or platform-competition process.
+  created_at            DateTime @default(now())
+
+  @@index([nominator_account_id])
 }

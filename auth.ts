@@ -1,17 +1,23 @@
 import NextAuth from "next-auth";
 import Nodemailer from "next-auth/providers/nodemailer";
-import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
+import { AccountPrismaAdapter } from "@/lib/auth-adapter";
 
-// Auth.js configured with the standard Prisma session adapter and DATABASE
-// sessions (not JWT). Database sessions are revocable, which Stage 1's
-// account-deletion and parent/child access-revocation flows depend on.
+// Auth.js configured with DATABASE sessions (not JWT), matching Stage 0.
+// Database sessions are revocable, which Stage 1's account-deletion and
+// parent/child access-revocation flows depend on.
 //
-// The email provider points at the local Mailpit catcher for development. In
-// production this becomes a config swap to Resend, not new code — the adapter
-// pattern is what keeps that swap (and a future Redis session store) cheap.
+// Stage 1 change: the adapter is now backed by the real `Account` model (via
+// AccountPrismaAdapter) rather than Stage 0's placeholder `User`. Session
+// resolution — `auth()` reading the session cookie — flows through it.
+//
+// The Nodemailer provider still points at Mailpit in dev (a Resend config swap
+// in production). Stage 1's actual auth flows (password signup/login, email
+// verification, password reset, reclaim) are custom services in lib/ that use
+// the same Nodemailer transport (lib/mail.ts); they do not depend on this
+// provider being exercised, but it is kept configured to match Stage 0.
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  adapter: PrismaAdapter(prisma),
+  adapter: AccountPrismaAdapter(prisma),
   session: { strategy: "database" },
   providers: [
     Nodemailer({
