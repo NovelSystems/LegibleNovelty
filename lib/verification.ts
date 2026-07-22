@@ -139,6 +139,9 @@ export async function grantPeerToken(
   grantingAccountId: string,
   recipientAccountId: string,
 ) {
+  if (grantingAccountId === recipientAccountId) {
+    throw new VerificationError("A token cannot be granted to oneself.");
+  }
   const granter = await prisma.account.findUniqueOrThrow({
     where: { account_id: grantingAccountId },
   });

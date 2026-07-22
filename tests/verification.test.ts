@@ -73,6 +73,11 @@ describe("Verified Educator verification (Task 6)", () => {
     const recipientEmail = uniqueEmail("recip");
     const recipient = await makeAccount({ email: recipientEmail });
 
+    // A VE cannot grant a token to themselves.
+    await expect(
+      grantPeerToken(granter.account_id, granter.account_id),
+    ).rejects.toThrow();
+
     const grant = await grantPeerToken(granter.account_id, recipient.account_id);
     expect(grant.granting_account_id).toBe(granter.account_id);
 
