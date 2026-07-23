@@ -25,6 +25,13 @@ import { ageInYears, effectiveGrade } from "@/lib/grade";
 
 const RECLAIM_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
+export class ChildAgeError extends Error {
+  constructor() {
+    super("A child sub-account must be under 13 at creation.");
+    this.name = "ChildAgeError";
+  }
+}
+
 // --- 3.2 Child sub-accounts --------------------------------------------------
 
 export interface CreateChildArgs {
@@ -52,6 +59,14 @@ export interface CreateChildArgs {
 // public handle — public identity stays "A [grade] learner from [Country]" — so
 // no display_name_hash is assigned and no display-name reuse check applies.
 export async function createChildSubAccount(args: CreateChildArgs) {
+  // Child mode and the graduated 13–17 minor state are DISTINCT states tied to
+  // actual age. An account creatable in child mode at 13+ would be a real bug,
+  // so creation is gated to under-13 by stored DOB. (Graduation at 13 then
+  // transitions an existing child out of this state — see login's lazy check.)
+  if (ageInYears(args.dateOfBirth) >= 13) {
+    throw new ChildAgeError();
+  }
+
   const emailHash = hashEmail(args.email);
 
   // Same identity guards as an ordinary signup, since this is a real account:

@@ -6,7 +6,11 @@ import {
   hashPassword,
   verifyPassword,
 } from "@/lib/crypto";
-import { sendEmailVerification, sendPasswordReset } from "@/lib/mail";
+import {
+  sendEmailVerification,
+  sendGraduationNotification,
+  sendPasswordReset,
+} from "@/lib/mail";
 import { ageInYears } from "@/lib/grade";
 
 // Core authentication (brief Task 2): signup, login, logout, password reset,
@@ -222,22 +226,40 @@ export async function login(email: string, password: string): Promise<string> {
   const ok = await verifyPassword(password, account.password_hash);
   if (!ok) throw new LoginError("Invalid email or password.");
 
-  // Parent-deletion holding state (Task 3.4): an under-13 child whose parent
-  // account is no longer active is blocked from new logins. This mirrors the
-  // childLoginBlockedByParent predicate in lib/lifecycle (kept inline here to
-  // avoid an accounts↔lifecycle import cycle).
-  if (account.is_child_subaccount && account.parent_account_id) {
-    const parent = await prisma.account.findUnique({
-      where: { account_id: account.parent_account_id },
-      select: { account_status: true },
-    });
-    if (
-      parent &&
-      parent.account_status !== "active" &&
-      account.date_of_birth &&
-      ageInYears(account.date_of_birth) < 13
-    ) {
-      throw new ChildAccessBlockedError(account.account_id);
+  // Child-mode transitions are evaluated lazily on this login check (no
+  // scheduler; consistent with the grade auto-increment lean). Two cases, in
+  // order:
+  if (account.is_child_subaccount && account.date_of_birth) {
+    if (ageInYears(account.date_of_birth) >= 13) {
+      // Automatic graduation at the 13th birthday (Task 3.3), driven by stored
+      // DOB. Flip the child out of child mode and fire the graduation
+      // notification once (idempotent: the flag flip means later logins skip
+      // this). The graduated 13–17 account remains ineligible for 18+ features
+      // — those check DOB directly, not graduation status. (processGraduations
+      // in lib/lifecycle is the equivalent batch path for accounts that never
+      // log in.)
+      await prisma.account.update({
+        where: { account_id: account.account_id },
+        data: { is_child_subaccount: false },
+      });
+      if (account.email) {
+        await sendGraduationNotification(
+          account.email,
+          account.notification_opt_outs,
+        );
+      }
+    } else if (account.parent_account_id) {
+      // Parent-deletion holding state (Task 3.4): an under-13 child whose parent
+      // account is no longer active is blocked from new logins. Mirrors the
+      // childLoginBlockedByParent predicate in lib/lifecycle (kept inline here
+      // to avoid an accounts↔lifecycle import cycle).
+      const parent = await prisma.account.findUnique({
+        where: { account_id: account.parent_account_id },
+        select: { account_status: true },
+      });
+      if (parent && parent.account_status !== "active") {
+        throw new ChildAccessBlockedError(account.account_id);
+      }
     }
   }
 
