@@ -32,6 +32,17 @@ export async function addChainEdge(args: {
   if (args.fromSeedId === args.toSeedId) {
     throw new ChainError("A chain edge cannot point a seed at itself.");
   }
+  // A chain_key lives within a single Topic (chains are "defined within a
+  // Topic"). Guard against a key accidentally spanning topics, which would make
+  // chainSequence — which keys only on chain_key — merge unrelated edges.
+  const existing = await prisma.seedChain.findFirst({
+    where: { chain_key: args.chainKey },
+    select: { topic_id: true },
+  });
+  if (existing && existing.topic_id !== args.topicId) {
+    throw new ChainError("This chain_key already belongs to a different Topic.");
+  }
+
   const seeds = await prisma.learningSeed.findMany({
     where: { seed_id: { in: [args.fromSeedId, args.toSeedId] } },
   });

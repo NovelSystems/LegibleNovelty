@@ -228,6 +228,43 @@ describe("Seed Editor — schema, workflow, placement, quota", () => {
     ).resolves.toBeTruthy();
   });
 
+  it("resets the daily count across a DST boundary (Nov 2 2025 fall-back)", async () => {
+    const architect = await makeAccount({ endorsed: true });
+    const { subject, topic } = await makeTaxonomyPair();
+    const mk = (now: Date) =>
+      publishSeedFixture(
+        { architectId: architect.account_id, subjectId: subject.taxonomy_id, topicId: topic.taxonomy_id },
+        now,
+      );
+
+    // Fill the daily quota on Nov 1 2025 (PDT, UTC-7): noon PDT == 19:00Z.
+    const nov1 = new Date("2025-11-01T19:00:00Z");
+    for (let i = 0; i < 10; i++) await mk(nov1);
+    await expect(mk(nov1)).rejects.toBeInstanceOf(PublishQuotaError); // 11th blocked.
+
+    // Nov 3 2025 (PST, UTC-8, AFTER the Nov 2 fall-back): 11:00 PST == 19:00Z.
+    // The Nov 1 publishes fall in a prior Pacific day, so the count has reset —
+    // and this only resolves correctly because the offset flipped -7 → -8.
+    const nov3 = new Date("2025-11-03T19:00:00Z");
+    await expect(mk(nov3)).resolves.toBeTruthy();
+  });
+
+  it("blocks placing a seed under a deprecated taxonomy node", async () => {
+    const architect = await makeAccount();
+    const { subject, topic } = await makeTaxonomyPair();
+    await prisma.taxonomy.update({
+      where: { taxonomy_id: topic.taxonomy_id },
+      data: { deprecated_at: new Date() },
+    });
+    await expect(
+      draftSeed({
+        architectId: architect.account_id,
+        subjectId: subject.taxonomy_id,
+        topicId: topic.taxonomy_id,
+      }),
+    ).rejects.toBeInstanceOf(SeedError);
+  });
+
   it("applies the quota uniformly regardless of role (no VE/Admin exemption)", async () => {
     // STATED ASSUMPTION (flagged in the summary): no role exemption. A VE hits
     // the same pre-endorsement concurrent cap as anyone else.

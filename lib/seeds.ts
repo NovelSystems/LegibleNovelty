@@ -31,6 +31,12 @@ async function assertValidPlacement(subjectId: string, topicId: string) {
   if (topic.parent_id !== subjectId) {
     throw new SeedError("topic must be nested under the given subject.");
   }
+  // Deprecate-not-delete is the taxonomy's versioning mechanism: a deprecated
+  // Topic keeps EXISTING placements valid (its row and id survive) but must not
+  // accept NEW ones. Without this guard, deprecation would be inert.
+  if (topic.deprecated_at || subject.deprecated_at) {
+    throw new SeedError("Cannot place a seed under a deprecated taxonomy node.");
+  }
 }
 
 // --- Create ------------------------------------------------------------------
