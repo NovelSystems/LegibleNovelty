@@ -9,7 +9,9 @@ import {
   listTokenRequestThreads,
   refreshDueTokens,
   rejectApplication,
+  VerificationError,
 } from "@/lib/verification";
+import { lockStandingScoreDirectly } from "@/lib/standing-scores";
 import { makeAccount, uniqueEmail } from "./helpers/factory";
 import { waitForMessagesTo } from "./helpers/mailpit";
 
@@ -42,6 +44,21 @@ describe("Verified Educator verification (Task 6)", () => {
 
     const msgs = await waitForMessagesTo(applicantEmail);
     expect(msgs.some((m) => /verified educator/i.test(m.Subject))).toBe(true);
+  });
+
+  it("refuses to approve an application for an ESS-latched applicant (audit fix — same bypass class as grants)", async () => {
+    const applicant = await makeAccount({ email: uniqueEmail("latched-app") });
+    const reviewer = await makeAccount();
+    await lockStandingScoreDirectly({ accountId: applicant.account_id, scoreType: "ESS", eventType: "lock" });
+
+    const app = await applyK12Professor(applicant.account_id);
+    await expect(
+      approveApplication({ applicationId: app.application_id, reviewerAccountId: reviewer.account_id }),
+    ).rejects.toBeInstanceOf(VerificationError);
+    // ve_status was NOT conferred (no bypass of the latch via a fresh approval).
+    expect(
+      (await prisma.account.findUniqueOrThrow({ where: { account_id: applicant.account_id } })).ve_status,
+    ).toBe(false);
   });
 
   it("rejects a license-holder application capturing a reason code (Path 1)", async () => {

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma, LearningSeed } from "@prisma/client";
 import { assertCanPublish } from "@/lib/quota";
+import { assertDssNotLocked } from "@/lib/standing-scores";
 
 // The full content-snapshot columns shared by a published seed and a
 // SeedRevision row (used for the publish-time baseline revision).
@@ -78,6 +79,9 @@ export interface CreateSeedArgs {
 }
 
 export async function createSeedDraft(args: CreateSeedArgs) {
+  // DSS-lock retrofit: a Developer-Standing-Score-locked account is blocked from
+  // seed authoring entirely — checked FIRST, independent of the publish quota.
+  await assertDssNotLocked(args.architectAccountId);
   await assertValidPlacement(args.subjectId, args.topicId); // Self-placement.
   return prisma.learningSeed.create({
     data: {
@@ -249,6 +253,9 @@ export async function publishSeed(
   if (seed.status !== "pending_review") {
     throw new SeedError("Only a seed in pending review can be published.");
   }
+  // DSS lock takes PRIORITY over the quota tiers — a locked account is blocked
+  // regardless of quota standing, not treated as a fourth tier.
+  await assertDssNotLocked(architectAccountId, now);
   await assertCanPublish(architectAccountId, now);
 
   return prisma.$transaction(async (tx) => {

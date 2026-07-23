@@ -206,6 +206,7 @@ model Account {
   tokens_received  TokenGrant[] @relation("GrantRecipient")
   flags            AccountFlag[] @relation("FlagAccount")
   flags_reviewed   AccountFlag[] @relation("FlagReviewer")
+  flags_secondary_reviewed AccountFlag[] @relation("FlagSecondaryReviewer")
   token_request_threads TokenRequestThread[]
   award_nominations AwardNomination[]
   awards_won        AwardInstance[]
@@ -215,6 +216,12 @@ model Account {
   seed_draft_comments  SeedDraftComment[]
   seed_revisions       SeedRevision[]    @relation("RevisionEditor")
   proposed_topics      Taxonomy[] @relation("TaxonomyProposer")
+  // Standing Scores (cross-cutting governance).
+  standing_scores        StandingScore[]
+  standing_score_events  StandingScoreEvent[] @relation("EventAccount")
+  moderated_score_events StandingScoreEvent[] @relation("EventModerator")
+  seed_reports_filed     SeedReport[]         @relation("ReportReporter")
+  seed_reports_resolved  SeedReport[]         @relation("ReportResolver")
 
   // email_hash and display_name_hash are the two indexed lookup columns the
   // brief requires (reclaim / reuse-blocking hit them on every signup).
@@ -343,8 +350,15 @@ model TokenGrant {
   grant_id            String    @id @default(uuid())
   granting_account_id String
   granting_account    Account   @relation("GrantGranter", fields: [granting_account_id], references: [account_id])
-  recipient_account_id String
-  recipient_account    Account  @relation("GrantRecipient", fields: [recipient_account_id], references: [account_id])
+  // Nullable: for a grant to an email with NO existing account yet, the
+  // recipient account isn't known until the invite link is used to create one.
+  recipient_account_id String?
+  recipient_account    Account?  @relation("GrantRecipient", fields: [recipient_account_id], references: [account_id])
+  // Set only for the no-account-yet path — the invited email address.
+  recipient_email      String?
+  // Set when the recipient completes account creation via the invite link (VE
+  // status is conferred at that moment). Null + no account + >28d = expired.
+  claimed_at           DateTime?
   granted_at   DateTime  @default(now())
   refreshed_at DateTime? // Set 1 month after use (token refresh rule).
 
@@ -389,8 +403,14 @@ model AccountFlag {
   related_token_grant    TokenGrant? @relation("FlagTokenGrant", fields: [related_token_grant_id], references: [grant_id])
   status     FlagStatus @default(pending)
   reason     String
+  // Primary moderator who initiates the review.
   reviewed_by String?
   reviewer    Account?   @relation("FlagReviewer", fields: [reviewed_by], references: [account_id])
+  // Second moderator who independently weighs in. A ve_conduct_review ESS lock
+  // fires only when BOTH reviewers are set (two distinct accounts) AND status is
+  // confirmed; a disagreeing secondary sets status = dismissed instead.
+  secondary_reviewed_by String?
+  secondary_reviewer    Account? @relation("FlagSecondaryReviewer", fields: [secondary_reviewed_by], references: [account_id])
   created_at  DateTime   @default(now())
   resolved_at DateTime?
 
@@ -548,6 +568,7 @@ model LearningSeed {
   invites      SeedDraftInvite[]
   comments     SeedDraftComment[]
   revisions    SeedRevision[]
+  reports      SeedReport[]
   chain_edges_out SeedChain[] @relation("ChainFrom")
   chain_edges_in  SeedChain[] @relation("ChainTo")
 
@@ -667,4 +688,88 @@ model SeedRevision {
   @@unique([seed_id, revision_number])
   @@index([seed_id])
   @@index([editor_account_id])
+}
+
+// ===========================================================================
+// Standing Scores (ESS / DSS / CSS) — cross-cutting content-governance
+// infrastructure (source: Content Governance Policy Section 10). One shared
+// mechanic (scale, weekly drift, 0-lock, restoration) across three score types,
+// modeled with a score_type discriminator rather than three parallel tables.
+// Both tables are internal moderation-triage data, invisible to the account
+// holder (Section 10.1).
+// ===========================================================================
+
+enum StandingScoreType {
+  ESS // Educator Standing Score
+  DSS // Developer Standing Score
+  CSS // Community Standing Score
+}
+
+model StandingScore {
+  standing_score_id String            @id @default(uuid())
+  account_id        String
+  account           Account           @relation(fields: [account_id], references: [account_id])
+  score_type        StandingScoreType
+  // MUST be decimal (not integer): DSS has a +0.1 trigger an integer column
+  // would silently round away.
+  current_value     Decimal           @db.Decimal(6, 2)
+  locked_at         DateTime? // Set when the value hits 0 (or a direct trigger).
+  // Drives the lazy weekly-drift calculation (Task 2); not a display field.
+  last_drift_computed_at DateTime
+
+  // One row per (account, score_type) pair.
+  @@unique([account_id, score_type])
+  @@index([account_id])
+}
+
+// The Historical Infraction Record (Section 10.6). APPEND-ONLY — rows are never
+// updated or deleted.
+model StandingScoreEvent {
+  event_id   String            @id @default(uuid())
+  account_id String
+  account    Account           @relation("EventAccount", fields: [account_id], references: [account_id])
+  score_type StandingScoreType
+  point_delta Decimal          @db.Decimal(6, 2) // Positive or negative.
+  // Extensible label, e.g. ve_token_rescinded, seed_report_dss_egregious, ess_lock.
+  event_type String
+  // moderator_account_id and explanation are required TOGETHER whenever an entry
+  // results from a moderator decision; neither is required for a system-triggered
+  // (e.g. numeric 0-floor lock) event. Enforced in lib/standing-scores.ts.
+  moderator_account_id String?
+  moderator            Account? @relation("EventModerator", fields: [moderator_account_id], references: [account_id])
+  explanation          String?
+  created_at           DateTime @default(now())
+
+  @@index([account_id])
+  @@index([score_type])
+}
+
+// ===========================================================================
+// SeedReport — the free-text vandalism report path the Seed Editor lacked
+// (Standing Scores Task 5). Deliberately lighter than Module's eventual report
+// system: no auto-escalation ladder. Resolution routes through the already-built
+// SeedRevision moderator-edit path — there is no separate takedown mechanism.
+// ===========================================================================
+
+enum SeedReportStatus {
+  pending
+  resolved
+}
+
+model SeedReport {
+  report_id           String           @id @default(uuid())
+  seed_id             String
+  seed                LearningSeed     @relation(fields: [seed_id], references: [seed_id])
+  reporter_account_id String
+  reporter            Account          @relation("ReportReporter", fields: [reporter_account_id], references: [account_id])
+  reason              String
+  status              SeedReportStatus @default(pending)
+  created_at          DateTime         @default(now())
+  resolved_at         DateTime?
+  resolved_by         String? // Moderator who resolved it.
+  resolver            Account?         @relation("ReportResolver", fields: [resolved_by], references: [account_id])
+
+  @@index([seed_id])
+  @@index([reporter_account_id])
+  @@index([status])
 }
