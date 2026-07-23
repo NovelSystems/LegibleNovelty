@@ -213,6 +213,7 @@ model Account {
   learning_seeds       LearningSeed[]
   seed_draft_invites   SeedDraftInvite[]
   seed_draft_comments  SeedDraftComment[]
+  seed_revisions       SeedRevision[]    @relation("RevisionEditor")
   proposed_topics      Taxonomy[] @relation("TaxonomyProposer")
 
   // email_hash and display_name_hash are the two indexed lookup columns the
@@ -546,6 +547,7 @@ model LearningSeed {
 
   invites      SeedDraftInvite[]
   comments     SeedDraftComment[]
+  revisions    SeedRevision[]
   chain_edges_out SeedChain[] @relation("ChainFrom")
   chain_edges_in  SeedChain[] @relation("ChainTo")
 
@@ -612,4 +614,57 @@ model SeedDraftComment {
 
   @@index([seed_id])
   @@index([commenter_account_id])
+}
+
+// Revision history for a published seed — a "controlled document," NOT a wiki.
+//
+// The parent LearningSeed.architect_account_id is the fixed, permanent document
+// OWNER and is never reassigned by anyone's edit (including a moderator's).
+// Each SeedRevision records who actually made THAT revision (editor_account_id)
+// — the architect or a Moderator — so there is no single evolving "author":
+// a fixed owner (the seed) plus a per-revision editor (the revision).
+//
+// Only the architect or a Moderator may create a revision (enforced in
+// lib/seeds.ts), only on a published seed, and edits are exempt from the publish
+// quota. Each revision stores a FULL SNAPSHOT of the seed's content (not a diff).
+// History is view-only: there is deliberately NO restore-to-a-prior-revision.
+model SeedRevision {
+  revision_id       String  @id @default(uuid())
+  seed_id           String
+  seed              LearningSeed @relation(fields: [seed_id], references: [seed_id])
+  editor_account_id String
+  editor            Account @relation("RevisionEditor", fields: [editor_account_id], references: [account_id])
+  // Sequential per seed (1-based), for stable ordering of queryable history.
+  revision_number   Int
+
+  // Snapshot of the fact AT EDIT TIME: was this made by a Moderator exercising
+  // the moderator permission (i.e. an editor who is not the seed's owner)?
+  // Snapshotted rather than re-derived from a live Account.role join, which
+  // could give the wrong answer if that account's role changes later — same
+  // snapshot-not-re-derive reasoning as other historical records in this project.
+  made_as_moderator Boolean
+  // Mandatory when made_as_moderator is true (enforced in application logic);
+  // optional for the architect's own edits — hence nullable at the column level.
+  edit_summary      String?
+
+  // Full content snapshot of the seed as of this revision (not a diff).
+  // subject_id / topic_id are stored as plain snapshot values (no FK), since a
+  // revision is a historical record of placement as it was at edit time.
+  learning_objective             String
+  entry_prerequisite             String
+  algorithmic_constraints        Json?
+  lesson_size_scope              String
+  subject_id                     String
+  topic_id                       String
+  grade_range                    String
+  target_learner_characteristics String?
+  language                       String
+  notes                          String
+  is_enrichment                  Boolean
+
+  created_at DateTime @default(now())
+
+  @@unique([seed_id, revision_number])
+  @@index([seed_id])
+  @@index([editor_account_id])
 }
