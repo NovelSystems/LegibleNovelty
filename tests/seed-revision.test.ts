@@ -52,7 +52,9 @@ describe("SeedRevision — controlled-document edits", () => {
       content: contentFor(subject.taxonomy_id, topic.taxonomy_id, "Sharper objective."),
       // No editSummary — optional for the architect's own edit.
     });
-    expect(rev.revision_number).toBe(1);
+    // Publication is revision 1 (baseline), so the architect's first EDIT is
+    // revision 2.
+    expect(rev.revision_number).toBe(2);
     expect(rev.made_as_moderator).toBe(false);
     expect(rev.edit_summary).toBeNull();
     expect(rev.editor_account_id).toBe(architect.account_id);
@@ -162,12 +164,37 @@ describe("SeedRevision — controlled-document edits", () => {
       }),
     ).rejects.toBeInstanceOf(SeedError);
 
-    // History accumulates in order across multiple edits of a published seed.
+    // History accumulates in order: baseline (rev 1) + two edits (rev 2, 3).
     const { seed, subject: s2, topic: t2 } = await publishedSeed(architect.account_id);
     await createSeedRevision({ seedId: seed.seed_id, editorAccountId: architect.account_id, content: contentFor(s2.taxonomy_id, t2.taxonomy_id, "v1") });
     await createSeedRevision({ seedId: seed.seed_id, editorAccountId: architect.account_id, content: contentFor(s2.taxonomy_id, t2.taxonomy_id, "v2") });
     const history = await getSeedRevisionHistory(seed.seed_id);
-    expect(history.map((r) => r.revision_number)).toEqual([1, 2]);
-    expect(history.map((r) => r.learning_objective)).toEqual(["v1", "v2"]);
+    expect(history.map((r) => r.revision_number)).toEqual([1, 2, 3]);
+    // First is the publish-time baseline; the two edits follow in order.
+    expect(history[0].made_as_moderator).toBe(false);
+    expect(history.slice(1).map((r) => r.learning_objective)).toEqual(["v1", "v2"]);
+  });
+
+  it("records publication itself as revision 1 (baseline), before any edits", async () => {
+    const architect = await makeAccount({ endorsed: true });
+    const { seed } = await publishedSeed(architect.account_id);
+
+    // A freshly-published seed with no edits still has exactly one revision.
+    const history = await getSeedRevisionHistory(seed.seed_id);
+    expect(history).toHaveLength(1);
+    const baseline = history[0];
+    expect(baseline.revision_number).toBe(1);
+    expect(baseline.editor_account_id).toBe(architect.account_id);
+    expect(baseline.made_as_moderator).toBe(false);
+    expect(baseline.edit_summary).toBeNull();
+
+    // The baseline matches the seed's published content.
+    const pub = await prisma.learningSeed.findUniqueOrThrow({
+      where: { seed_id: seed.seed_id },
+    });
+    expect(baseline.learning_objective).toBe(pub.learning_objective);
+    expect(baseline.subject_id).toBe(pub.subject_id);
+    expect(baseline.topic_id).toBe(pub.topic_id);
+    expect(baseline.language).toBe(pub.language);
   });
 });

@@ -1,6 +1,26 @@
 import { prisma } from "@/lib/prisma";
-import type { Prisma } from "@prisma/client";
+import type { Prisma, LearningSeed } from "@prisma/client";
 import { assertCanPublish } from "@/lib/quota";
+
+// The full content-snapshot columns shared by a published seed and a
+// SeedRevision row (used for the publish-time baseline revision).
+function seedContentSnapshot(seed: LearningSeed) {
+  const ac = seed.algorithmic_constraints;
+  return {
+    learning_objective: seed.learning_objective,
+    entry_prerequisite: seed.entry_prerequisite,
+    lesson_size_scope: seed.lesson_size_scope,
+    subject_id: seed.subject_id,
+    topic_id: seed.topic_id,
+    grade_range: seed.grade_range,
+    notes: seed.notes,
+    language: seed.language,
+    algorithmic_constraints:
+      ac === null ? undefined : (ac as Prisma.InputJsonValue),
+    target_learner_characteristics: seed.target_learner_characteristics,
+    is_enrichment: seed.is_enrichment,
+  };
+}
 
 // Learning Seed lifecycle + the private draft-sharing/comment workflow
 // (Seed Editor Tasks 1, 2, 4). No authoring gate: any account may create a
@@ -230,9 +250,35 @@ export async function publishSeed(
     throw new SeedError("Only a seed in pending review can be published.");
   }
   await assertCanPublish(architectAccountId, now);
-  return prisma.learningSeed.update({
-    where: { seed_id: seedId },
-    data: { status: "published", published_at: now },
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.learningSeed.update({
+      where: { seed_id: seedId },
+      data: { status: "published", published_at: now },
+    });
+
+    // Wikipedia-style: the FIRST publication is itself revision 1 — a baseline
+    // snapshot of the seed as published, authored by the architect. Gated on
+    // "no revisions yet" so an endorsement round-trip (draft → republish)
+    // doesn't inject a duplicate baseline; only genuine createSeedRevision edits
+    // grow the history after this. editor = the architect, made_as_moderator =
+    // false, edit_summary null (a creation event has no summary, and this is not
+    // subject to the moderator-summary rule since the architect authored it).
+    const existing = await tx.seedRevision.count({ where: { seed_id: seedId } });
+    if (existing === 0) {
+      await tx.seedRevision.create({
+        data: {
+          seed_id: seedId,
+          editor_account_id: architectAccountId,
+          revision_number: 1,
+          made_as_moderator: false,
+          edit_summary: null,
+          ...seedContentSnapshot(seed),
+        },
+      });
+    }
+
+    return updated;
   });
 }
 
