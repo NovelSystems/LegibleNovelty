@@ -51,8 +51,8 @@ is the authoritative source for product behaviour.
 
 ## Build status
 
-The project is built in stages. **Stages 0 and 1 are complete.** Everything below them is
-designed and specified, not yet implemented.
+The project is built in stages. **Stages 0 and 1, plus the Workshop Seed Editor, are
+complete.** Everything below them is designed and specified, not yet implemented.
 
 - ✅ **Stage 0 — Infrastructure substrate.** A fully local, zero-cost
   Docker environment: PostgreSQL, the Node application container, and a Mailpit email catcher;
@@ -67,6 +67,14 @@ designed and specified, not yet implemented.
   peer-token paths) with peer-token accountability; account status badges; an Awards backend
   schema (no user-facing surface); and the seven account/authentication email triggers. The
   Awards **frontend** and business logic remain deferred.
+- ✅ **Workshop — Seed Editor _(first of three Workshop sub-stages)_.** Learning Seed schema
+  (no authoring gate), the two-level Subject→Topic Taxonomy, Seed Chains with backend
+  coverage/gap/density/language-coverage queries (the curriculum-map view itself is deferred),
+  the private draft-sharing/comment workflow (invite-only, threaded, auto-revoke on submission),
+  the two asymmetric placement paths (self-service revision vs. endorsement placement-flag
+  return-to-Draft), and the anti-spam publish quota (3 concurrent pre-endorsement → 10/day
+  after, resetting at midnight `America/Los_Angeles`). Module Editor and Lesson Planner remain
+  deferred; Endorsement itself is Library's.
 - ⬜ **Later subsystems.** Library (browse/search/reading, endorsement, lesson plans),
   Workshop (seed & module authoring, commission marketplace, moderation), Certification Center
   (the LNC mini-LMS), Communication (comments, Big Questions, forum), Notification, and

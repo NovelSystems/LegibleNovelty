@@ -184,6 +184,12 @@ model Account {
   fotl_status                  Boolean @default(false) // Payments & Billing (later).
   veframework_onboarding_passed Boolean @default(false) // Placeholder gate; mechanism out of scope.
 
+  // Cached "has this architect ever had a seed endorsed" flag, read on the
+  // publish-quota hot path (Seed Editor Task 5). Default false; NOTHING in the
+  // Seed Editor sub-stage sets it to true — Library's Endorsement logic does,
+  // once it exists. Added now because the quota logic already reads it.
+  first_seed_endorsement_received Boolean @default(false)
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
@@ -203,6 +209,11 @@ model Account {
   token_request_threads TokenRequestThread[]
   award_nominations AwardNomination[]
   awards_won        AwardInstance[]
+  // Workshop / Seed Editor.
+  learning_seeds       LearningSeed[]
+  seed_draft_invites   SeedDraftInvite[]
+  seed_draft_comments  SeedDraftComment[]
+  proposed_topics      Taxonomy[] @relation("TaxonomyProposer")
 
   // email_hash and display_name_hash are the two indexed lookup columns the
   // brief requires (reclaim / reuse-blocking hit them on every signup).
@@ -426,4 +437,179 @@ model AwardNomination {
   created_at            DateTime @default(now())
 
   @@index([nominator_account_id])
+}
+
+// ===========================================================================
+// Workshop — Seed Editor (first sub-stage). Learning Seeds, their two-level
+// Taxonomy, Seed Chains, and the private draft-sharing/comment workflow.
+// ===========================================================================
+
+enum SeedStatus {
+  draft
+  pending_review
+  published
+}
+
+enum TaxonomyLevel {
+  subject
+  topic
+}
+
+enum SeedCommentStatus {
+  open
+  resolved
+  dismissed
+}
+
+// Two-level, grade-independent taxonomy (Subject → Topic only; a third level
+// was deliberately rejected). "Versioned so adding a Topic never breaks existing
+// seed placements": nodes have stable ids and are additive, and a Topic that
+// falls out of use is DEPRECATED (deprecated_at set), never hard-deleted, so any
+// seed still placed under it keeps a valid reference. `version` records the
+// taxonomy revision a node was introduced in.
+model Taxonomy {
+  taxonomy_id String        @id @default(uuid())
+  level       TaxonomyLevel
+  name        String
+  // Topic → its parent Subject (null for a Subject). Self-relation.
+  parent_id   String?
+  parent      Taxonomy?     @relation("TaxonomyParent", fields: [parent_id], references: [taxonomy_id])
+  children    Taxonomy[]    @relation("TaxonomyParent")
+
+  version      Int      @default(1)
+  deprecated_at DateTime?
+
+  // Subjects/Topics are admin-maintained; a VE may PROPOSE a Topic and a
+  // System_Admin approves. The proposal→approval routing is undecided (Open
+  // Items) — these columns support it without deciding the workflow.
+  proposed_by_account_id String?
+  proposed_by            Account? @relation("TaxonomyProposer", fields: [proposed_by_account_id], references: [account_id])
+  approved               Boolean  @default(true)
+
+  created_at DateTime @default(now())
+
+  seeds_as_subject LearningSeed[] @relation("SeedSubject")
+  seeds_as_topic   LearningSeed[] @relation("SeedTopic")
+  chains           SeedChain[]
+
+  @@index([level])
+  @@index([parent_id])
+}
+
+// A Learning Seed (Section 5.1). Minimal, reusable pedagogical object carrying
+// no domain flavor. NO authoring gate — any Community Member may create one.
+model LearningSeed {
+  seed_id               String @id @default(uuid())
+  architect_account_id  String
+  architect             Account @relation(fields: [architect_account_id], references: [account_id])
+
+  learning_objective  String
+  entry_prerequisite  String
+  // GENUINELY UNRESOLVED shape (Open Items) — only ever illustrated for Math.
+  // Deliberately a loose JSON column, NOT over-designed; expected to firm up
+  // through actual use of the editor, not from more spec work.
+  algorithmic_constraints Json?
+  lesson_size_scope   String // Explicitly declared, not implicit.
+
+  subject_id String
+  subject    Taxonomy @relation("SeedSubject", fields: [subject_id], references: [taxonomy_id])
+  topic_id   String
+  topic      Taxonomy @relation("SeedTopic", fields: [topic_id], references: [taxonomy_id])
+
+  grade_range                  String  // Free-text, deliberately not sortable.
+  target_learner_characteristics String? // Optional.
+
+  // Content language, needed for the language-coverage query (Task 3). Not in
+  // the brief's field table, but the required query needs a language dimension
+  // on the seed — flagged in the delivery summary as an added field.
+  language String @default("en")
+
+  // Miscellaneous/enriching seeds associate with a Topic via metadata ("enriches
+  // this content within Topic Y") rather than a chain relationship — they enrich
+  // rather than advance, so they are excluded from chain-advancement queries.
+  is_enrichment Boolean @default(false)
+
+  // Commission Marketplace doesn't exist yet — SOFT reference (plain UUID, no
+  // enforced FK), same pattern as Stage 1's lesson_plan_id.
+  associated_commission_id String?
+
+  notes  String // The sizeable, deliberately-unstructured catch-all.
+  status SeedStatus @default(draft)
+
+  published_at DateTime? // Set when status → published; drives the daily quota.
+  // Soft delete (same convention as Stage 1's Account). Deleting a published
+  // seed frees a quota slot without losing the row for referential integrity.
+  deleted_at DateTime?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  invites      SeedDraftInvite[]
+  comments     SeedDraftComment[]
+  chain_edges_out SeedChain[] @relation("ChainFrom")
+  chain_edges_in  SeedChain[] @relation("ChainTo")
+
+  @@index([architect_account_id])
+  @@index([topic_id])
+  @@index([status])
+  // Composite index for the two hot quota queries (concurrent + daily).
+  @@index([architect_account_id, status, published_at])
+}
+
+// A directed Seed Chain edge (Section 6.4): Seed A → Seed B, within a Topic.
+// Chains are defined at the seed level and DECOUPLED from taxonomy structure;
+// multiple competing chains can coexist in one Topic, distinguished by chain_key.
+model SeedChain {
+  chain_edge_id String   @id @default(uuid())
+  topic_id      String
+  topic         Taxonomy @relation(fields: [topic_id], references: [taxonomy_id])
+  // Distinguishes competing chains within the same Topic.
+  chain_key     String
+  from_seed_id  String
+  from_seed     LearningSeed @relation("ChainFrom", fields: [from_seed_id], references: [seed_id])
+  to_seed_id    String
+  to_seed       LearningSeed @relation("ChainTo", fields: [to_seed_id], references: [seed_id])
+  created_at    DateTime @default(now())
+
+  @@unique([chain_key, from_seed_id, to_seed_id])
+  @@index([topic_id])
+  @@index([chain_key])
+}
+
+// Draft-sharing invite (Section 7.1). The architect invites SPECIFIC registered
+// accounts (never open links). Auto-revoked on submission to Pending Review.
+model SeedDraftInvite {
+  invite_id          String   @id @default(uuid())
+  seed_id            String
+  seed               LearningSeed @relation(fields: [seed_id], references: [seed_id])
+  invited_account_id String
+  invited_account    Account  @relation(fields: [invited_account_id], references: [account_id])
+  invited_at         DateTime @default(now())
+  revoked_at         DateTime? // Set automatically on submission to Pending Review.
+
+  @@index([seed_id])
+  @@index([invited_account_id])
+}
+
+// Threaded draft comment (Section 7.1). GENERIC by design: commenter_account_id
+// is either an invited draft-reviewer (this sub-stage) OR, later, an endorsing
+// VE (Library's endorsement-return-to-draft flow) — same table, same mechanism,
+// no hardcoded actor type, so Library reuses it without a schema change.
+model SeedDraftComment {
+  comment_id           String   @id @default(uuid())
+  seed_id              String
+  seed                 LearningSeed @relation(fields: [seed_id], references: [seed_id])
+  commenter_account_id String
+  commenter            Account  @relation(fields: [commenter_account_id], references: [account_id])
+  // Optional threading: a reply points at its parent comment.
+  parent_comment_id    String?
+  parent_comment       SeedDraftComment? @relation("CommentThread", fields: [parent_comment_id], references: [comment_id])
+  replies              SeedDraftComment[] @relation("CommentThread")
+  body                 String
+  status               SeedCommentStatus @default(open) // Set by the architect.
+  created_at           DateTime @default(now())
+  resolved_at          DateTime?
+
+  @@index([seed_id])
+  @@index([commenter_account_id])
 }
