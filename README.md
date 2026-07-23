@@ -51,17 +51,22 @@ is the authoritative source for product behaviour.
 
 ## Build status
 
-The project is built in stages. **Stage 0 is complete.** Everything below it is designed and
-specified, not yet implemented.
+The project is built in stages. **Stages 0 and 1 are complete.** Everything below them is
+designed and specified, not yet implemented.
 
-- ✅ **Stage 0 — Infrastructure substrate _(this repo, today)_.** A fully local, zero-cost
+- ✅ **Stage 0 — Infrastructure substrate.** A fully local, zero-cost
   Docker environment: PostgreSQL, the Node application container, and a Mailpit email catcher;
   Auth.js wired for revocable **database sessions** via the Prisma adapter; a single-command
   check script standing in for CI. No cloud accounts or paid services required to run it.
-- ⬜ **Stage 1 — User Management _(next)_.** Accounts and identity: the account lifecycle
-  (dates of birth, child sub-accounts, parent relationships, purge/reclaim), Verified Educator
-  verification paths and peer tokens, and account status badges — built on the working,
-  revocable-session foundation Stage 0 provides.
+- ✅ **Stage 1 — User Management _(this repo, today)_.** The real `Account` schema and
+  identity substrate built on Stage 0's revocable sessions: core authentication (signup,
+  login/logout, password reset, email verification); the account lifecycle (dates of birth,
+  child sub-accounts, automatic graduation, parent dormancy/deletion, deactivation, purge and
+  reclaim, platform-wide display-name reuse blocking); Connection/ParentApproval; Share Contact
+  Information; Verified Educator verification (institutional/directory, license-holder, and
+  peer-token paths) with peer-token accountability; account status badges; an Awards backend
+  schema (no user-facing surface); and the seven account/authentication email triggers. The
+  Awards **frontend** and business logic remain deferred.
 - ⬜ **Later subsystems.** Library (browse/search/reading, endorsement, lesson plans),
   Workshop (seed & module authoring, commission marketplace, moderation), Certification Center
   (the LNC mini-LMS), Communication (comments, Big Questions, forum), Notification, and
@@ -167,23 +172,24 @@ up — rebuild with `docker compose down -v` and bring the environment back up.
 
 ```
 .
-├── app/                     # Next.js App Router (routes + the Auth.js handler)
+├── app/                     # Next.js App Router (routes, actions, components)
 │   └── api/auth/[...nextauth]/route.ts
-├── auth.ts                  # Auth.js config: Prisma adapter + database sessions
-├── lib/prisma.ts            # Shared PrismaClient
+├── auth.ts                  # Auth.js config: Account-backed adapter + database sessions
+├── lib/                     # Stage 1 service layer (accounts, lifecycle, verification, …)
 ├── prisma/
-│   ├── schema.prisma        # Stage 0: placeholder User/Session models only
+│   ├── schema.prisma        # Stage 1: Account + full User Management schema
 │   └── migrations/          # Committed migration history
 ├── db/init/                 # Postgres init (shadow + test databases, UTF-8)
-├── tests/                   # Vitest: session create/revoke, Mailpit email capture
+├── tests/                   # Vitest: auth, lifecycle, VE flows, flags, badges, email
 ├── scripts/check.sh         # Manual CI substitute
 ├── docker-compose.yml       # postgres + app + mailpit
 ├── Dockerfile               # node:24-alpine + Corepack
 └── .env.example             # Documents required environment variables
 ```
 
-The Prisma schema is intentionally minimal at Stage 0 — just the `User` and `Session` models
-needed to prove the Auth.js session adapter works end to end. The real account model, seeds,
+Stage 1 replaces Stage 0's placeholder `User` with the real `Account` model and the rest of
+the User Management schema (Connection, ParentApproval, VerificationApplication, TokenGrant,
+AccountFlag, TokenRequestThread, and the Awards backend tables). The real seeds,
 modules, and everything else arrive with their respective subsystems.
 
 ---
