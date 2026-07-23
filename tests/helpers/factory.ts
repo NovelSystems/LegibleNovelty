@@ -27,6 +27,9 @@ export interface MakeAccountOpts {
   ageYears?: number;
   password?: string;
   ve?: boolean;
+  // Past the first-endorsement threshold — lifts the pre-endorsement publish
+  // cap so quota-agnostic tests aren't accidentally constrained by it.
+  endorsed?: boolean;
 }
 
 export async function makeAccount(opts: MakeAccountOpts = {}) {
@@ -43,6 +46,7 @@ export async function makeAccount(opts: MakeAccountOpts = {}) {
       email_verified: new Date(),
       ve_status: opts.ve ?? false,
       ve_token_available: opts.ve ?? false,
+      first_seed_endorsement_received: opts.endorsed ?? false,
     },
   });
 }
