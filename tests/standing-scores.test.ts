@@ -13,8 +13,8 @@ import {
   StandingScoreError,
   RESTORE_VALUE,
 } from "@/lib/standing-scores";
-import { grantPeerToken } from "@/lib/verification";
-import { makeAccount } from "./helpers/factory";
+import { grantPeerToken, VerificationError } from "@/lib/verification";
+import { makeAccount, uniqueEmail } from "./helpers/factory";
 
 const WEEK = 7 * 24 * 60 * 60 * 1000;
 function value(row: { current_value: unknown }): number {
@@ -28,16 +28,27 @@ describe("Standing Scores — drift, locking, restoration", () => {
 
   // --- drift ----------------------------------------------------------------
 
-  it("computes cumulative multi-week drift in one read and stops at 50", () => {
-    // Pure closed-form checks of the per-week table.
-    expect(driftedValue(45, 3)).toBe(48); // 1..49, +1/week
-    expect(driftedValue(48, 5)).toBe(50); // stops at 50, no overshoot
-    expect(driftedValue(48, 3)).toBe(50); // 48->49->50->50 over 3 weeks, not 51
-    expect(driftedValue(55, 3)).toBe(52); // 51..100, -1/week
-    expect(driftedValue(52, 9)).toBe(50); // stops at 50
-    expect(driftedValue(50, 4)).toBe(50); // 50 -> +0
-    expect(driftedValue(0, 3)).toBe(0); // 0 -> +0 (locked floor, no drift up)
-    expect(driftedValue(30, 0)).toBe(30); // no elapsed weeks
+  it("computes cumulative multi-week drift in one read and stops at 50 (not latched)", () => {
+    expect(driftedValue(45, 3, false)).toBe(48); // 1..49, +1/week
+    expect(driftedValue(48, 5, false)).toBe(50); // stops at 50, no overshoot
+    expect(driftedValue(48, 3, false)).toBe(50); // 48->49->50->50 over 3 weeks, not 51
+    expect(driftedValue(55, 3, false)).toBe(52); // 51..100, -1/week
+    expect(driftedValue(52, 9, false)).toBe(50); // stops at 50
+    expect(driftedValue(50, 4, false)).toBe(50); // 50 -> +0
+    expect(driftedValue(0, 3, false)).toBe(0); // 0 -> +0
+    expect(driftedValue(30, 0, false)).toBe(30); // no elapsed weeks
+  });
+
+  it("applies the latch counter only in the 1..49 bucket", () => {
+    // Latched 1..49 is net 0 — flat across any number of weeks.
+    expect(driftedValue(30, 1, true)).toBe(30);
+    expect(driftedValue(30, 5, true)).toBe(30);
+    expect(driftedValue(1, 10, true)).toBe(1);
+    expect(driftedValue(49, 10, true)).toBe(49);
+    // Latch does NOT counter the other buckets.
+    expect(driftedValue(55, 3, true)).toBe(52); // 51..100 still -1/week
+    expect(driftedValue(0, 3, true)).toBe(0); // 0 fixed
+    expect(driftedValue(50, 3, true)).toBe(50); // 50 fixed
   });
 
   it("applies and persists drift lazily on read (3-week catch-up at once)", async () => {
@@ -133,9 +144,60 @@ describe("Standing Scores — drift, locking, restoration", () => {
     expect(value(await getStandingScore(account.account_id, "CSS", twoWeeks))).toBe(7);
   });
 
+  // --- latch behavior -------------------------------------------------------
+
+  it("holds a latched 1..49 score flat across many weeks, then resumes drift on restoration", async () => {
+    const account = await makeAccount();
+    const t0 = new Date("2025-08-01T00:00:00Z");
+    // Lock numerically (value → 0, latched), then a positive event lands the
+    // latched score in-range at 30.
+    await recordStandingScoreDelta(
+      { accountId: account.account_id, scoreType: "CSS", delta: -55, eventType: "lock" },
+      t0,
+    );
+    await recordStandingScoreDelta(
+      { accountId: account.account_id, scoreType: "CSS", delta: 30, eventType: "to30" },
+      t0,
+    );
+    expect(value(await getStandingScore(account.account_id, "CSS", t0))).toBe(30);
+    expect(await isScoreLocked(account.account_id, "CSS", t0)).toBe(true);
+
+    // Flat across any number of weeks while latched (no drift toward 50).
+    for (const w of [1, 3, 8]) {
+      const at = new Date(t0.getTime() + w * WEEK);
+      expect(value(await getStandingScore(account.account_id, "CSS", at))).toBe(30);
+    }
+
+    // Restoration clears the latch; drift resumes normally (5 → 7 after 2 weeks).
+    const tRestore = new Date(t0.getTime() + 8 * WEEK);
+    await restoreStandingScore({ accountId: account.account_id, scoreType: "CSS", resolutionTime: tRestore });
+    const later = new Date(tRestore.getTime() + 2 * WEEK);
+    expect(value(await getStandingScore(account.account_id, "CSS", later))).toBe(7);
+  });
+
+  it("decouples value from access: a positive event moves a latched value but functionality stays blocked", async () => {
+    const account = await makeAccount();
+    // Lock DSS numerically (value → 0, latched).
+    await recordStandingScoreDelta(
+      { accountId: account.account_id, scoreType: "DSS", delta: -55, eventType: "lock" },
+      new Date(),
+    );
+    expect(await isScoreLocked(account.account_id, "DSS")).toBe(true);
+
+    // An unrelated positive event raises current_value above 0…
+    const after = await recordStandingScoreDelta(
+      { accountId: account.account_id, scoreType: "DSS", delta: 15, eventType: "reward" },
+      new Date(),
+    );
+    expect(value(after)).toBe(15);
+    // …but the latch is untouched — functionality remains blocked.
+    expect(after.locked_at).not.toBeNull();
+    expect(await isScoreLocked(account.account_id, "DSS")).toBe(true);
+  });
+
   // --- ESS lock consequences + restoration token check ----------------------
 
-  it("ESS lock sets ve_status AND lnc_status false regardless of which was held", async () => {
+  it("ESS lock sets ve_status AND lnc_status false and forces current_value to 0", async () => {
     const account = await makeAccount({ ve: true });
     await prisma.account.update({
       where: { account_id: account.account_id },
@@ -149,32 +211,42 @@ describe("Standing Scores — drift, locking, restoration", () => {
     const after = await prisma.account.findUniqueOrThrow({ where: { account_id: account.account_id } });
     expect(after.ve_status).toBe(false);
     expect(after.lnc_status).toBe(false);
+    // Direct lock forces the value to 0, aligned with the latch.
+    expect(value(await getStandingScore(account.account_id, "ESS"))).toBe(0);
   });
 
-  it("ESS restoration rejects a fresh grant from the ORIGINAL granter, accepts a different VE", async () => {
+  it("ESS restoration is restore-THEN-grant: grants are rejected while latched, permitted after unlock", async () => {
+    // Conflict resolution (flagged): the new latch rule forbids granting VE to a
+    // latched account, so the fresh different-VE grant now happens AFTER the
+    // moderator restoration unlocks the latch — not before.
     const veA = await makeAccount({ ve: true });
     const veB = await makeAccount({ ve: true });
-    const account = await makeAccount();
+    const account = await makeAccount({ email: uniqueEmail("essrestore") });
 
-    // Original peer-token grant from VE-A.
-    await grantPeerToken(veA.account_id, account.account_id);
-    // ESS gets locked.
+    await grantPeerToken(veA.account_id, account.account_id); // original grant
     await lockStandingScoreDirectly({ accountId: account.account_id, scoreType: "ESS", eventType: "lock" });
 
-    // A fresh grant from the SAME granter (VE-A) does not qualify.
-    await prisma.account.update({ where: { account_id: veA.account_id }, data: { ve_token_available: true } });
-    await grantPeerToken(veA.account_id, account.account_id);
-    expect(await canRestoreEss(account.account_id)).toBe(false);
-    await expect(
-      restoreEssLock({ accountId: account.account_id, resolutionTime: new Date() }),
-    ).rejects.toBeInstanceOf(StandingScoreError);
+    // While latched, a fresh grant is REJECTED (no ve_status bypass).
+    await expect(grantPeerToken(veB.account_id, account.account_id)).rejects.toBeInstanceOf(
+      VerificationError,
+    );
+    expect(
+      (await prisma.account.findUniqueOrThrow({ where: { account_id: account.account_id } })).ve_status,
+    ).toBe(false);
 
-    // A fresh grant from a DIFFERENT VE (VE-B) qualifies.
-    await grantPeerToken(veB.account_id, account.account_id);
-    expect(await canRestoreEss(account.account_id)).toBe(true);
+    // Moderator restoration unlocks (uniform: value 5, latch cleared).
     const restored = await restoreEssLock({ accountId: account.account_id, resolutionTime: new Date() });
     expect(restored.locked_at).toBeNull();
     expect(value(restored)).toBe(RESTORE_VALUE);
+
+    // Now (unlocked) a fresh grant from a different VE re-confers ve_status.
+    const granted = await grantPeerToken(veB.account_id, account.account_id);
+    expect(granted.granting_account_id).toBe(veB.account_id);
+    expect(
+      (await prisma.account.findUniqueOrThrow({ where: { account_id: account.account_id } })).ve_status,
+    ).toBe(true);
+    // canRestoreEss still confirms the fresh grant is from a different VE.
+    expect(await canRestoreEss(account.account_id)).toBe(true);
   });
 
   // --- moderator attribution ------------------------------------------------

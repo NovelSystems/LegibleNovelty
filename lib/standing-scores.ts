@@ -36,23 +36,29 @@ function num(v: Prisma.Decimal | number): number {
 
 // --- Drift -------------------------------------------------------------------
 
-// Passive weekly drift as a plain per-week table applied directly to the value,
-// with NO separate is-locked condition:
+// Passive weekly drift as a per-week table applied directly to the value. The
+// latch (locked_at) counters drift in exactly ONE bucket:
 //
-//   0        -> +0     (0 already means locked — handled for free by arithmetic)
-//   1..49    -> +1
-//   50       -> +0
-//   51..100  -> -1
+//   current_value    not latched    latched
+//   0                +0             +0
+//   1..49            +1             +1 base, -1 counter = net 0
+//   50               +0             +0
+//   51..100          -1             -1 (no counter)
 //
-// Closed form over any number of elapsed weeks, never overshooting 50 (e.g.
-// 48 over 3 weeks is 48->49->50->50 = 50, not 51). A value of exactly 0 is a
-// fixed point, so a locked-at-0 score stays put without any lock check.
-export function driftedValue(value: number, weeks: number): number {
+// So a latched account anywhere in 1..49 does not move week over week — it must
+// not drift toward "looking recovered" while unresolved. This is the ONLY place
+// latch state feeds drift (not a return to skipping all drift while locked).
+// Closed form over any number of weeks, never overshooting 50 (48 over 3 weeks
+// = 50, not 51). Value 0 is a fixed point, so a locked-at-0 score stays put.
+export function driftedValue(value: number, weeks: number, latched: boolean): number {
   if (weeks <= 0) return value;
   if (value <= 0) return 0; // 0 -> +0
   if (value === DRIFT_TARGET) return value; // 50 -> +0
-  if (value < DRIFT_TARGET) return round1(Math.min(DRIFT_TARGET, value + weeks)); // 1..49 -> +1/wk
-  return round1(Math.max(DRIFT_TARGET, value - weeks)); // >50 -> -1/wk
+  if (value < DRIFT_TARGET) {
+    // 1..49: +1/week, but a latch cancels it to net 0.
+    return latched ? value : round1(Math.min(DRIFT_TARGET, value + weeks));
+  }
+  return round1(Math.max(DRIFT_TARGET, value - weeks)); // 51..100: -1/week, no counter
 }
 
 async function getOrCreateRow(
@@ -93,7 +99,9 @@ async function readWithDrift(
   const weeks = Math.floor(elapsed / WEEK_MS);
   if (weeks <= 0) return row;
 
-  const newValue = driftedValue(num(row.current_value), weeks);
+  // Latch state feeds drift ONLY to cancel the 1..49 climb (see driftedValue).
+  // It never clears locked_at and never gates any other bucket.
+  const newValue = driftedValue(num(row.current_value), weeks, row.locked_at != null);
   const newAnchor = new Date(row.last_drift_computed_at.getTime() + weeks * WEEK_MS);
   return db.standingScore.update({
     where: { standing_score_id: row.standing_score_id },
@@ -249,9 +257,11 @@ export async function lockStandingScoreDirectly(
     const row = await readWithDrift(tx, args.accountId, args.scoreType, now);
     if (row.locked_at) return row;
 
+    // A direct lock forces current_value to 0 at the moment it fires, keeping
+    // the numeric value and the latch aligned for accurate moderator display.
     await tx.standingScore.update({
       where: { standing_score_id: row.standing_score_id },
-      data: { locked_at: now },
+      data: { locked_at: now, current_value: 0 },
     });
     await applyLockConsequences(tx, args.accountId, args.scoreType);
     await insertEvent(tx, { ...args, delta: 0 });
@@ -338,14 +348,19 @@ export async function canRestoreEss(accountId: string): Promise<boolean> {
   return grants.some((g) => g.granting_account_id !== original.granting_account_id);
 }
 
+// FLAGGED CONFLICT (resolved here, see delivery summary): the earlier Standing
+// Scores brief made "a fresh TokenGrant from a different VE" a PRECONDITION of
+// ESS restoration. The new latch rule rejects peer-token grants to a latched
+// account outright (see grantPeerToken/claimPeerTokenGrant), so such a grant can
+// no longer PRECEDE restoration — the precondition became unsatisfiable. The
+// coherent ordering is therefore restore-THEN-grant: the moderator appeal
+// unlocks the ESS latch (uniform restoration), and only afterwards can a
+// different VE issue a fresh grant that re-confers ve_status (now permitted
+// because the account is no longer latched). canRestoreEss is retained so a
+// caller can still verify that fresh grant exists post-restoration.
 export async function restoreEssLock(
   args: { accountId: string; resolutionTime: Date } & ModeratorAttribution,
 ) {
-  if (!(await canRestoreEss(args.accountId))) {
-    throw new StandingScoreError(
-      "ESS restoration requires a fresh TokenGrant from a different VE than the original granter.",
-    );
-  }
   return restoreStandingScore({ ...args, scoreType: "ESS" });
 }
 

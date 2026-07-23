@@ -5,6 +5,7 @@ import { PublishQuotaError } from "@/lib/quota";
 import {
   isScoreLocked,
   lockStandingScoreDirectly,
+  recordStandingScoreDelta,
   StandingScoreError,
 } from "@/lib/standing-scores";
 import {
@@ -49,6 +50,27 @@ describe("Standing Scores retrofit into the Seed Editor + flag wiring", () => {
     await expect(publishSeed(seed.seed_id, architect.account_id)).rejects.not.toBeInstanceOf(
       PublishQuotaError,
     );
+  });
+
+  it("blocks authoring on locked_at even when current_value has been raised above 0", async () => {
+    const architect = await makeAccount();
+    const { subject, topic } = await makeTaxonomyPair();
+    // Lock DSS numerically (value → 0, latched), then raise the value above 0.
+    await recordStandingScoreDelta(
+      { accountId: architect.account_id, scoreType: "DSS", delta: -55, eventType: "lock" },
+      new Date(),
+    );
+    const raised = await recordStandingScoreDelta(
+      { accountId: architect.account_id, scoreType: "DSS", delta: 20, eventType: "raise" },
+      new Date(),
+    );
+    expect(Number(raised.current_value)).toBe(20); // value is well above 0…
+    expect(raised.locked_at).not.toBeNull(); // …but the latch is still set.
+
+    // The authoring gate is on locked_at, not current_value → still blocked.
+    await expect(
+      draftSeed({ architectId: architect.account_id, subjectId: subject.taxonomy_id, topicId: topic.taxonomy_id }),
+    ).rejects.toBeInstanceOf(StandingScoreError);
   });
 
   it("leaves a moderator's SeedRevision edit UNAFFECTED by the architect's DSS lock", async () => {

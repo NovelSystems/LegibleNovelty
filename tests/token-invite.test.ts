@@ -7,6 +7,8 @@ import {
   reconcileExpiredPeerTokenGrants,
   VerificationError,
 } from "@/lib/verification";
+import { lockStandingScoreDirectly } from "@/lib/standing-scores";
+import { prisma as db } from "@/lib/prisma";
 import { makeAccount, uniqueEmail, dobForAge } from "./helpers/factory";
 
 // VE token grant to an email that has no account yet — invite-link flow with a
@@ -104,6 +106,27 @@ describe("VE peer-token grant-to-email + 28-day expiry", () => {
     expect(await reconcileExpiredPeerTokenGrants(granter.account_id, within)).toBe(false);
     expect(
       (await prisma.account.findUniqueOrThrow({ where: { account_id: granter.account_id } })).ve_token_available,
+    ).toBe(false);
+  });
+
+  it("rejects a grant (direct or by-email) to an ESS-latched recipient", async () => {
+    const granter = await makeAccount({ ve: true });
+    const latched = await makeAccount({ ve: true, email: uniqueEmail("latched") });
+    // Latch the recipient's ESS (revokes their VE).
+    await lockStandingScoreDirectly({ accountId: latched.account_id, scoreType: "ESS", eventType: "lock" });
+
+    // Direct grant is rejected — no silent ve_status restore.
+    await expect(grantPeerToken(granter.account_id, latched.account_id)).rejects.toBeInstanceOf(
+      VerificationError,
+    );
+    // The by-email entry point routes to the instant path for an existing
+    // account and is rejected too.
+    await expect(grantPeerTokenByEmail(granter.account_id, latched.email!)).rejects.toBeInstanceOf(
+      VerificationError,
+    );
+    // ve_status stayed false throughout.
+    expect(
+      (await db.account.findUniqueOrThrow({ where: { account_id: latched.account_id } })).ve_status,
     ).toBe(false);
   });
 

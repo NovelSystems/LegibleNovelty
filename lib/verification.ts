@@ -7,6 +7,19 @@ import {
   sendVeDecision,
 } from "@/lib/mail";
 import { signup, type SignupArgs } from "@/lib/accounts";
+import { isScoreLocked } from "@/lib/standing-scores";
+
+// A latched ESS is a hard gate on conferring ve_status: nothing except moderator
+// restoration may lift it. A peer token or a fresh verification approval must NOT
+// silently restore ve_status on a latched account (that would bypass the appeal).
+async function assertEssNotLatched(accountId: string, now: Date) {
+  if (await isScoreLocked(accountId, "ESS", now)) {
+    throw new VerificationError(
+      "This account's Educator Standing Score is latched; VE status cannot be " +
+        "conferred until a moderator restores it.",
+    );
+  }
+}
 
 // Verified Educator verification — Phase 1 manual only (brief Task 6,
 // Section 4.1). Backed by real VerificationApplication (Path 1) and TokenGrant
@@ -69,13 +82,18 @@ export interface ReviewApproveArgs {
 
 // Reviewer approves an application → grants VE status. Both Path-1 sub-paths
 // produce identical VE status (no visible distinction from a peer-token grant).
-export async function approveApplication(args: ReviewApproveArgs) {
+export async function approveApplication(args: ReviewApproveArgs, now: Date = new Date()) {
   const app = await prisma.verificationApplication.findUniqueOrThrow({
     where: { application_id: args.applicationId },
   });
   if (app.status !== "pending") {
     throw new VerificationError("Application is not pending.");
   }
+  // AUDIT FIX (flagged): approveApplication also confers ve_status, so it is the
+  // same ESS-latch bypass class as grantPeerToken. A latched applicant cannot
+  // regain VE via a fresh institutional/license approval either — only moderator
+  // restoration lifts the latch.
+  await assertEssNotLatched(app.applicant_account_id, now);
 
   const applicant = await prisma.account.update({
     where: { account_id: app.applicant_account_id },
@@ -161,6 +179,8 @@ export async function grantPeerToken(
   if (!granter.ve_token_available) {
     throw new VerificationError("You have no token available to grant.");
   }
+  // A latched ESS recipient cannot have VE restored by a fresh grant.
+  await assertEssNotLatched(recipientAccountId, now);
 
   const result = await prisma.$transaction(async (tx) => {
     const grant = await tx.tokenGrant.create({
@@ -306,6 +326,10 @@ export async function claimPeerTokenGrant(
 
   // Create the recipient's account (Stage 1 signup; sends its own verification).
   const account = await signup(signupArgs);
+
+  // Defensive: a freshly created account is never latched, but the same
+  // no-bypass rule applies here as to a direct grant.
+  await assertEssNotLatched(account.account_id, now);
 
   const linked = await prisma.$transaction(async (tx) => {
     await tx.tokenGrant.update({
