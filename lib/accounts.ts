@@ -7,6 +7,7 @@ import {
   verifyPassword,
 } from "@/lib/crypto";
 import { sendEmailVerification, sendPasswordReset } from "@/lib/mail";
+import { ageInYears } from "@/lib/grade";
 
 // Core authentication (brief Task 2): signup, login, logout, password reset,
 // email verification — all against the real Account schema and database
@@ -181,6 +182,20 @@ export class LoginError extends Error {
   }
 }
 
+// A child account whose parent was deleted is held out of NEW logins until its
+// 13th birthday (Task 3.4). The blocked-login screen explains this and offers to
+// purge the child's own account immediately (childPurgeSelf in lib/lifecycle).
+// The account id is carried so that self-purge action can target it.
+export class ChildAccessBlockedError extends Error {
+  constructor(public readonly childAccountId: string) {
+    super(
+      "This account is temporarily unavailable because the managing parent " +
+        "account was deleted. Access returns at age 13.",
+    );
+    this.name = "ChildAccessBlockedError";
+  }
+}
+
 // Password login → creates a database-backed Session row and returns its token
 // (to be set as the Auth.js session cookie). Auth.js resolves this cookie via
 // the Account-backed adapter in lib/auth-adapter.ts.
@@ -206,6 +221,25 @@ export async function login(email: string, password: string): Promise<string> {
   }
   const ok = await verifyPassword(password, account.password_hash);
   if (!ok) throw new LoginError("Invalid email or password.");
+
+  // Parent-deletion holding state (Task 3.4): an under-13 child whose parent
+  // account is no longer active is blocked from new logins. This mirrors the
+  // childLoginBlockedByParent predicate in lib/lifecycle (kept inline here to
+  // avoid an accounts↔lifecycle import cycle).
+  if (account.is_child_subaccount && account.parent_account_id) {
+    const parent = await prisma.account.findUnique({
+      where: { account_id: account.parent_account_id },
+      select: { account_status: true },
+    });
+    if (
+      parent &&
+      parent.account_status !== "active" &&
+      account.date_of_birth &&
+      ageInYears(account.date_of_birth) < 13
+    ) {
+      throw new ChildAccessBlockedError(account.account_id);
+    }
+  }
 
   return createSessionFor(account.account_id);
 }

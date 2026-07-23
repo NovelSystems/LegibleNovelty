@@ -1,6 +1,11 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/prisma";
-import { signup, DisplayNameTakenError } from "@/lib/accounts";
+import {
+  signup,
+  login,
+  DisplayNameTakenError,
+  ChildAccessBlockedError,
+} from "@/lib/accounts";
 import {
   beginReclaim,
   ReclaimError,
@@ -22,31 +27,76 @@ describe("Account lifecycle (Task 3)", () => {
     await prisma.$disconnect();
   });
 
-  it("creates a child sub-account with a name-free public identity", async () => {
+  it("creates a standalone child sub-account with its own credentials and a name-free public identity", async () => {
     const parent = await makeAccount({ ageYears: 40 });
+    const childEmail = uniqueEmail("child");
     const child = await createChildSubAccount({
       parentAccountId: parent.account_id,
       dateOfBirth: dobForAge(9),
       legalName: "Never Displayed",
       grade: 3,
       country: "Canada",
+      email: childEmail,
+      password: "child own password",
     });
     expect(child.is_child_subaccount).toBe(true);
-    expect(child.email).toBeNull();
+    expect(child.parent_account_id).toBe(parent.account_id);
+    // A fully standalone account with its OWN independent login credentials
+    // (not a profile switched into from the parent's session).
+    expect(child.email).toBe(childEmail);
+    expect(child.email_hash).toBeTruthy();
+    expect(child.password_hash).toBeTruthy();
+    // Public identity is still name-free.
     const identity = childPublicIdentity(child);
     expect(identity).toContain("Canada");
     expect(identity).not.toContain("Never Displayed");
+
+    // The child can log in independently with its own credentials.
+    const token = await login(childEmail, "child own password");
+    expect(token).toBeTruthy();
+  });
+
+  it("puts multiple children under one parent via parent_account_id alone (no grouping entity)", async () => {
+    const parent = await makeAccount({ ageYears: 44 });
+    const childA = await createChildSubAccount({
+      parentAccountId: parent.account_id,
+      dateOfBirth: dobForAge(7),
+      legalName: "Kid A",
+      grade: 1,
+      country: "Peru",
+      email: uniqueEmail("kidA"),
+      password: "kid a password",
+    });
+    const childB = await createChildSubAccount({
+      parentAccountId: parent.account_id,
+      dateOfBirth: dobForAge(11),
+      legalName: "Kid B",
+      grade: 5,
+      country: "Peru",
+      email: uniqueEmail("kidB"),
+      password: "kid b password",
+    });
+    const siblings = await prisma.account.findMany({
+      where: { parent_account_id: parent.account_id },
+      select: { account_id: true },
+    });
+    const ids = siblings.map((s) => s.account_id);
+    expect(ids).toContain(childA.account_id);
+    expect(ids).toContain(childB.account_id);
+    expect(ids).toHaveLength(2);
   });
 
   it("graduates a child at 13 and notifies (Task 10 trigger)", async () => {
-    const parentEmail = uniqueEmail("gradparent");
-    const parent = await makeAccount({ email: parentEmail, ageYears: 45 });
+    const parent = await makeAccount({ ageYears: 45 });
+    const childEmail = uniqueEmail("gradchild");
     const child = await createChildSubAccount({
       parentAccountId: parent.account_id,
       dateOfBirth: dobForAge(13), // Reached the 13th birthday.
       legalName: "Grad Kid",
       grade: 8,
       country: "Ireland",
+      email: childEmail,
+      password: "grad kid password",
     });
 
     const graduated = await processGraduations();
@@ -57,21 +107,27 @@ describe("Account lifecycle (Task 3)", () => {
     });
     expect(after.is_child_subaccount).toBe(false); // Now a standard account.
 
-    // Graduation email delivered to the managing parent.
-    const msgs = await waitForMessagesTo(parentEmail);
+    // Graduation email delivered to the child's own account.
+    const msgs = await waitForMessagesTo(childEmail);
     expect(msgs.some((m) => /graduat/i.test(m.Subject))).toBe(true);
   });
 
-  it("warns on parent deletion and holds an under-13 child's login", async () => {
+  it("warns on parent deletion and holds an under-13 child's own login", async () => {
     const parentEmail = uniqueEmail("delparent");
     const parent = await makeAccount({ email: parentEmail, ageYears: 50 });
+    const childEmail = uniqueEmail("heldchild");
     const child = await createChildSubAccount({
       parentAccountId: parent.account_id,
       dateOfBirth: dobForAge(8),
       legalName: "Held Kid",
       grade: 2,
       country: "Spain",
+      email: childEmail,
+      password: "held kid password",
     });
+
+    // Before deletion the child can log in with its own credentials.
+    await expect(login(childEmail, "held kid password")).resolves.toBeTruthy();
 
     await warnAndDeleteParent(parent.account_id, "deactivate");
 
@@ -84,8 +140,12 @@ describe("Account lifecycle (Task 3)", () => {
     });
     expect(deadParent.account_status).toBe("deactivated");
 
-    // Under-13 child is blocked from new logins during the holding state.
+    // Under-13 child is now blocked from NEW logins during the holding state —
+    // both the predicate and the actual login path enforce it.
     expect(childLoginBlockedByParent(child, deadParent)).toBe(true);
+    await expect(login(childEmail, "held kid password")).rejects.toBeInstanceOf(
+      ChildAccessBlockedError,
+    );
   });
 
   it("deactivates and reactivates without data loss", async () => {

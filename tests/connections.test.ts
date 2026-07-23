@@ -16,7 +16,7 @@ import {
   ContactShareError,
 } from "@/lib/contact";
 import { createChildSubAccount } from "@/lib/lifecycle";
-import { dobForAge, makeAccount } from "./helpers/factory";
+import { dobForAge, makeAccount, uniqueEmail } from "./helpers/factory";
 
 describe("Connection & ParentApproval (Task 4) + Share Contact (Task 5)", () => {
   afterAll(async () => {
@@ -44,6 +44,8 @@ describe("Connection & ParentApproval (Task 4) + Share Contact (Task 5)", () => 
       legalName: "Kid",
       grade: 4,
       country: "Italy",
+      email: uniqueEmail("pathchild"),
+      password: "path kid password",
     });
 
     // one_time_pass → NO standing connection after approval.

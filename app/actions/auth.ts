@@ -10,8 +10,10 @@ import {
   verifyEmail,
   ReclaimRequiredError,
   LoginError,
+  ChildAccessBlockedError,
   DisplayNameTakenError,
 } from "@/lib/accounts";
+import { childPurgeSelf } from "@/lib/lifecycle";
 
 // Thin server-action wrappers over the auth service layer (brief Task 2). The
 // business logic and its tests live in lib/accounts.ts; these adapt it to
@@ -71,11 +73,26 @@ export async function loginAction(formData: FormData) {
     if (err instanceof ReclaimRequiredError) {
       return { ok: false as const, reason: "reclaim_required" };
     }
+    if (err instanceof ChildAccessBlockedError) {
+      // The blocked-child screen offers immediate self-purge; carry the id.
+      return {
+        ok: false as const,
+        reason: "child_access_blocked",
+        childAccountId: err.childAccountId,
+      };
+    }
     if (err instanceof LoginError) {
       return { ok: false as const, reason: err.message };
     }
     return { ok: false as const, reason: "error" };
   }
+}
+
+// The self-service escape hatch on the blocked-child login screen (Task 3.4):
+// purge my own account immediately rather than wait for my 13th birthday.
+export async function childPurgeSelfAction(childAccountId: string) {
+  await childPurgeSelf(childAccountId);
+  return { ok: true as const };
 }
 
 export async function logoutAction() {

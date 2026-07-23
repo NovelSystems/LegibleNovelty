@@ -13,7 +13,11 @@ import {
   sendParentDeletionWarning,
   sendReclaimVerification,
 } from "@/lib/mail";
-import { assertDisplayNameAvailable } from "@/lib/accounts";
+import {
+  assertDisplayNameAvailable,
+  issueEmailVerification,
+  ReclaimRequiredError,
+} from "@/lib/accounts";
 import { ageInYears, effectiveGrade } from "@/lib/grade";
 
 // Account lifecycle logic (brief Task 3): child sub-accounts, automatic
@@ -29,14 +33,42 @@ export interface CreateChildArgs {
   legalName: string; // Stored, never displayed.
   grade: number;
   country: string;
+  // A child account is a FULLY STANDALONE Account with its OWN independent login
+  // credentials (not a profile switched into from the parent's session). The
+  // parent creates the account and supplies these at creation (COPPA: the
+  // parent-creates-and-grants model is the compliance mechanism), after which
+  // the child logs in independently.
+  email: string;
+  password: string;
 }
 
 // COPPA/FERPA posture (3.6): a child sub-account is a real DB record created BY
-// the parent (the compliance mechanism for under-13 creation, not a checkbox).
-// A child has no public handle — public identity is "A [grade] learner from
-// [Country]" — so no display_name_hash is assigned and no reuse check applies.
+// the parent (the compliance mechanism for under-13 creation, not a checkbox),
+// linked to the parent solely via parent_account_id — there is no Household /
+// Family grouping entity; multiple children are just multiple rows sharing one
+// parent_account_id.
+//
+// The child is a standalone account with its own email + password. It has no
+// public handle — public identity stays "A [grade] learner from [Country]" — so
+// no display_name_hash is assigned and no display-name reuse check applies.
 export async function createChildSubAccount(args: CreateChildArgs) {
-  return prisma.account.create({
+  const emailHash = hashEmail(args.email);
+
+  // Same identity guards as an ordinary signup, since this is a real account:
+  // reclaim takes precedence, and the email must be unique.
+  const purged = await prisma.account.findFirst({
+    where: { email_hash: emailHash, account_status: "purged" },
+    select: { account_id: true },
+  });
+  if (purged) throw new ReclaimRequiredError(purged.account_id);
+
+  const existing = await prisma.account.findUnique({
+    where: { email: args.email },
+    select: { account_id: true },
+  });
+  if (existing) throw new Error("An account with this email already exists.");
+
+  const child = await prisma.account.create({
     data: {
       is_child_subaccount: true,
       parent_account_id: args.parentAccountId,
@@ -45,9 +77,16 @@ export async function createChildSubAccount(args: CreateChildArgs) {
       grade: args.grade,
       grade_anchor_date: new Date(),
       country: args.country,
-      // No email/password: access is mediated through the parent (COPPA).
+      // The child's OWN credentials.
+      email: args.email,
+      email_hash: emailHash,
+      password_hash: await hashPassword(args.password),
     },
   });
+
+  // Standalone account → its own email-verification flow (Task 10).
+  await issueEmailVerification(child.account_id, args.email);
+  return child;
 }
 
 // Public identity string for a child sub-account — no name, no exact age.
@@ -88,10 +127,9 @@ export async function processGraduations(now: Date = new Date()): Promise<string
       // per-feature DOB check — graduation does not confer adult features.
       data: { is_child_subaccount: false },
     });
-    // A child sub-account has no email of its own (COPPA, parent-mediated), so
-    // the graduation notice goes to the child's own address if one exists,
-    // otherwise the managing parent's. (Recipient was unspecified in the brief;
-    // flagged as an assumption in the delivery summary.)
+    // A child account owns its own email, so the graduation notice goes to the
+    // child's own address (falling back to the parent's only in the unusual case
+    // that a legacy child row has none).
     const recipient = child.email ?? child.parent?.email ?? null;
     if (recipient) {
       const optOuts = child.email
