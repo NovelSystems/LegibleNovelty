@@ -195,49 +195,64 @@ async function applyLockConsequences(
 // always recorded (append-only), the stored value is clamped at 0, and crossing
 // to <=0 (when not already locked) LOCKS the score and fires its consequences.
 // A delta while already locked is still logged but never moves the value below 0.
-export async function recordStandingScoreDelta(
-  args: {
-    accountId: string;
-    scoreType: StandingScoreType;
-    delta: number;
-    eventType: string;
-  } & ModeratorAttribution,
+export type StandingScoreDeltaArgs = {
+  accountId: string;
+  scoreType: StandingScoreType;
+  delta: number;
+  eventType: string;
+} & ModeratorAttribution;
+
+// The core delta application, operating within a supplied transaction client so
+// callers can compose it atomically with their own writes (e.g. a Module review
+// decision + its score events in ONE transaction).
+export async function applyStandingScoreDeltaWithin(
+  tx: Prisma.TransactionClient,
+  args: StandingScoreDeltaArgs,
   now: Date = new Date(),
 ) {
-  return prisma.$transaction(async (tx) => {
-    const row = await readWithDrift(tx, args.accountId, args.scoreType, now);
-    const wasLocked = row.locked_at != null;
-    const raw = round1(num(row.current_value) + args.delta);
-    const newValue = Math.max(LOCK_FLOOR, raw);
-    const shouldLock = !wasLocked && raw <= LOCK_FLOOR;
+  const row = await readWithDrift(tx, args.accountId, args.scoreType, now);
+  const wasLocked = row.locked_at != null;
+  const raw = round1(num(row.current_value) + args.delta);
+  const newValue = Math.max(LOCK_FLOOR, raw);
+  const shouldLock = !wasLocked && raw <= LOCK_FLOOR;
 
-    // The infraction/reward event records the NOMINAL delta (faithful history),
-    // even when the stored value is clamped at the floor.
-    await insertEvent(tx, args);
+  // The infraction/reward event records the NOMINAL delta (faithful history),
+  // even when the stored value is clamped at the floor.
+  await insertEvent(tx, args);
 
-    await tx.standingScore.update({
-      where: { standing_score_id: row.standing_score_id },
-      data: {
-        current_value: newValue,
-        ...(shouldLock ? { locked_at: now } : {}),
-      },
-    });
-
-    if (shouldLock) {
-      await applyLockConsequences(tx, args.accountId, args.scoreType);
-      // Distinct system-triggered lock marker (moderator null).
-      await insertEvent(tx, {
-        accountId: args.accountId,
-        scoreType: args.scoreType,
-        delta: 0,
-        eventType: `${args.scoreType.toLowerCase()}_lock`,
-      });
-    }
-
-    return tx.standingScore.findUniqueOrThrow({
-      where: { standing_score_id: row.standing_score_id },
-    });
+  await tx.standingScore.update({
+    where: { standing_score_id: row.standing_score_id },
+    data: {
+      current_value: newValue,
+      ...(shouldLock ? { locked_at: now } : {}),
+    },
   });
+
+  if (shouldLock) {
+    await applyLockConsequences(tx, args.accountId, args.scoreType);
+    // Distinct system-triggered lock marker (moderator null).
+    await insertEvent(tx, {
+      accountId: args.accountId,
+      scoreType: args.scoreType,
+      delta: 0,
+      eventType: `${args.scoreType.toLowerCase()}_lock`,
+    });
+  }
+
+  return tx.standingScore.findUniqueOrThrow({
+    where: { standing_score_id: row.standing_score_id },
+  });
+}
+
+// Applies a delta to a score in its own transaction. Drift is brought current
+// first, the delta event is always recorded (append-only), the stored value is
+// clamped at 0, and crossing to <=0 (when not already locked) LOCKS the score
+// and fires its consequences.
+export async function recordStandingScoreDelta(
+  args: StandingScoreDeltaArgs,
+  now: Date = new Date(),
+) {
+  return prisma.$transaction((tx) => applyStandingScoreDeltaWithin(tx, args, now));
 }
 
 // --- Direct lock (no numeric deduction) --------------------------------------
@@ -328,36 +343,19 @@ export async function restoreStandingScore(
   });
 }
 
-// --- ESS-specific restoration precondition -----------------------------------
+// --- ESS restoration ---------------------------------------------------------
 
-// ESS restoration additionally requires a FRESH TokenGrant from a VE whose
-// account differs from the original granter — queried from Stage 1's existing
-// TokenGrant table (no new field). "Original" = the earliest grant to this
-// account; "fresh" = a later grant from a DIFFERENT granting account.
-export async function canRestoreEss(accountId: string): Promise<boolean> {
-  const grants = await prisma.tokenGrant.findMany({
-    where: { recipient_account_id: accountId },
-    orderBy: { granted_at: "asc" },
-  });
-  if (grants.length === 0) return false; // No original grant to supersede.
-  const original = grants[0]; // Earliest grant by granted_at.
-  // The distinguishing requirement is a grant from a DIFFERENT VE than the
-  // original granter. Every non-original grant is by construction >= the
-  // original in time, so a granter-identity check alone is correct (and avoids
-  // false negatives when grants share a timestamp).
-  return grants.some((g) => g.granting_account_id !== original.granting_account_id);
-}
-
-// FLAGGED CONFLICT (resolved here, see delivery summary): the earlier Standing
-// Scores brief made "a fresh TokenGrant from a different VE" a PRECONDITION of
-// ESS restoration. The new latch rule rejects peer-token grants to a latched
-// account outright (see grantPeerToken/claimPeerTokenGrant), so such a grant can
-// no longer PRECEDE restoration — the precondition became unsatisfiable. The
-// coherent ordering is therefore restore-THEN-grant: the moderator appeal
-// unlocks the ESS latch (uniform restoration), and only afterwards can a
-// different VE issue a fresh grant that re-confers ve_status (now permitted
-// because the account is no longer latched). canRestoreEss is retained so a
-// caller can still verify that fresh grant exists post-restoration.
+// FLAGGED (cleanup carried from the Standing Scores brief, resolved here): the
+// earlier design made "a fresh TokenGrant from a different VE" a PRECONDITION of
+// ESS restoration (the old canRestoreEss gate). The latch rule rejects peer
+// grants to a latched account outright, so such a grant can no longer PRECEDE
+// restoration — the precondition became unsatisfiable. The coherent ordering is
+// restore-THEN-grant: the moderator appeal unlocks the latch (uniform
+// restoration), then a different VE issues a fresh grant that re-confers
+// ve_status. The old canRestoreEss helper was therefore dead code and has been
+// DELETED. NOTE (flagged in the summary): the "different VE than the original
+// granter" constraint is consequently no longer enforced anywhere; re-adding it
+// as a grant-time check is a separate design decision.
 export async function restoreEssLock(
   args: { accountId: string; resolutionTime: Date } & ModeratorAttribution,
 ) {

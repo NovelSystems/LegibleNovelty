@@ -1,13 +1,15 @@
 import { prisma } from "@/lib/prisma";
-import { startOfPacificDay } from "@/lib/pacific-time";
 import { recordStandingScoreDelta } from "@/lib/standing-scores";
+import {
+  REPORT_DAILY_CAP,
+  combinedReportsTodayCount,
+  overReportCap,
+} from "@/lib/report-quota";
 
 // Seed content reporting (Standing Scores Task 5) — the free-text vandalism gap
 // the Seed Editor lacked. A report surfaces to Moderators; RESOLUTION happens
 // through the already-built SeedRevision moderator-edit path (no new takedown
 // mechanism). Score consequences on resolution are applied here.
-
-export const REPORT_DAILY_CAP = 3;
 
 // PROPOSED CSS point values (flagged in the summary as not confirmed): a seed
 // report is severity-closest to a comment report, so +5 if upheld / -2 if
@@ -32,22 +34,9 @@ export class SeedReportError extends Error {
   }
 }
 
-// Combined daily report count for this reporter across comments, modules, and
-// seeds. Only SeedReports exist today — comment/module reports would be added to
-// this sum once those systems land; the cap and reset stay the same.
-export async function reportsTodayCount(
-  reporterAccountId: string,
-  now: Date = new Date(),
-): Promise<number> {
-  const since = startOfPacificDay(now);
-  const seedReports = await prisma.seedReport.count({
-    where: { reporter_account_id: reporterAccountId, created_at: { gte: since } },
-  });
-  return seedReports;
-}
-
-// File a report on a seed's content. Enforces the shared 3-per-day cap
-// (calendar day, midnight Pacific — the same convention as the publish quota).
+// File a report on a seed's content. Enforces the SHARED 3-per-day cap combined
+// across seeds and modules (lib/report-quota) — the same convention as the
+// publish quota.
 export async function fileSeedReport(
   args: { seedId: string; reporterAccountId: string; reason: string },
   now: Date = new Date(),
@@ -56,7 +45,7 @@ export async function fileSeedReport(
   if (!seed || seed.deleted_at) throw new SeedReportError("Seed not found.");
   if (!args.reason.trim()) throw new SeedReportError("A report reason is required.");
 
-  if ((await reportsTodayCount(args.reporterAccountId, now)) >= REPORT_DAILY_CAP) {
+  if (overReportCap(await combinedReportsTodayCount(args.reporterAccountId, now))) {
     throw new SeedReportError(
       `You have reached the limit of ${REPORT_DAILY_CAP} reports per day (resets at midnight Pacific).`,
     );

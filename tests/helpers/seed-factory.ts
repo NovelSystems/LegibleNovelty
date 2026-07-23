@@ -22,13 +22,14 @@ export interface SeedFixtureOpts {
   topicId: string;
   language?: string;
   isEnrichment?: boolean;
+  objective?: string;
 }
 
 // Create a draft with sensible defaults.
 export function draftSeed(opts: SeedFixtureOpts) {
   return createSeedDraft({
     architectAccountId: opts.architectId,
-    learningObjective: "Understand single-digit multiplication.",
+    learningObjective: opts.objective ?? "Understand single-digit multiplication.",
     entryPrerequisite: "Can add single digits.",
     lessonSizeScope: "single-session",
     subjectId: opts.subjectId,
