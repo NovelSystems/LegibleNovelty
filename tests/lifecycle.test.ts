@@ -9,6 +9,7 @@ import {
 import {
   beginReclaim,
   ReclaimError,
+  ChildAgeError,
   childLoginBlockedByParent,
   childPublicIdentity,
   completeReclaim,
@@ -86,21 +87,50 @@ describe("Account lifecycle (Task 3)", () => {
     expect(ids).toHaveLength(2);
   });
 
-  it("graduates a child at 13 and notifies (Task 10 trigger)", async () => {
+  it("rejects creating a child sub-account at 13 or older", async () => {
+    const parent = await makeAccount({ ageYears: 45 });
+    // A 13-year-old belongs in the graduated minor state, not child mode — the
+    // creation path must reject it rather than mint a child account.
+    await expect(
+      createChildSubAccount({
+        parentAccountId: parent.account_id,
+        dateOfBirth: dobForAge(13),
+        legalName: "Too Old",
+        grade: 8,
+        country: "Ireland",
+        email: uniqueEmail("tooold"),
+        password: "too old password",
+      }),
+    ).rejects.toBeInstanceOf(ChildAgeError);
+  });
+
+  it("graduates a child at 13 on the next login check (Task 10 trigger)", async () => {
     const parent = await makeAccount({ ageYears: 45 });
     const childEmail = uniqueEmail("gradchild");
+    // Create a GENUINE under-13 child through the guarded creation path.
     const child = await createChildSubAccount({
       parentAccountId: parent.account_id,
-      dateOfBirth: dobForAge(13), // Reached the 13th birthday.
+      dateOfBirth: dobForAge(12),
       legalName: "Grad Kid",
       grade: 8,
       country: "Ireland",
       email: childEmail,
       password: "grad kid password",
     });
+    expect(child.is_child_subaccount).toBe(true);
 
-    const graduated = await processGraduations();
-    expect(graduated).toContain(child.account_id);
+    // Reach the 13th birthday by patching the stored DOB directly — a fixture
+    // shortcut that deliberately bypasses the creation-path guard (which exists
+    // only to reject minting a child account at 13+, not to freeze an existing
+    // child's clock).
+    await prisma.account.update({
+      where: { account_id: child.account_id },
+      data: { date_of_birth: dobForAge(13) },
+    });
+
+    // The next login check triggers automatic graduation.
+    const token = await login(childEmail, "grad kid password");
+    expect(token).toBeTruthy();
 
     const after = await prisma.account.findUniqueOrThrow({
       where: { account_id: child.account_id },
@@ -110,6 +140,31 @@ describe("Account lifecycle (Task 3)", () => {
     // Graduation email delivered to the child's own account.
     const msgs = await waitForMessagesTo(childEmail);
     expect(msgs.some((m) => /graduat/i.test(m.Subject))).toBe(true);
+  });
+
+  it("also graduates a due child via the processGraduations batch path", async () => {
+    const parent = await makeAccount({ ageYears: 46 });
+    const childEmail = uniqueEmail("batchgrad");
+    const child = await createChildSubAccount({
+      parentAccountId: parent.account_id,
+      dateOfBirth: dobForAge(11),
+      legalName: "Batch Kid",
+      grade: 6,
+      country: "Portugal",
+      email: childEmail,
+      password: "batch kid password",
+    });
+    await prisma.account.update({
+      where: { account_id: child.account_id },
+      data: { date_of_birth: dobForAge(13) },
+    });
+
+    const graduated = await processGraduations();
+    expect(graduated).toContain(child.account_id);
+    const after = await prisma.account.findUniqueOrThrow({
+      where: { account_id: child.account_id },
+    });
+    expect(after.is_child_subaccount).toBe(false);
   });
 
   it("warns on parent deletion and holds an under-13 child's own login", async () => {
