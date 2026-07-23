@@ -206,6 +206,7 @@ model Account {
   tokens_received  TokenGrant[] @relation("GrantRecipient")
   flags            AccountFlag[] @relation("FlagAccount")
   flags_reviewed   AccountFlag[] @relation("FlagReviewer")
+  flags_secondary_reviewed AccountFlag[] @relation("FlagSecondaryReviewer")
   token_request_threads TokenRequestThread[]
   award_nominations AwardNomination[]
   awards_won        AwardInstance[]
@@ -349,8 +350,15 @@ model TokenGrant {
   grant_id            String    @id @default(uuid())
   granting_account_id String
   granting_account    Account   @relation("GrantGranter", fields: [granting_account_id], references: [account_id])
-  recipient_account_id String
-  recipient_account    Account  @relation("GrantRecipient", fields: [recipient_account_id], references: [account_id])
+  // Nullable: for a grant to an email with NO existing account yet, the
+  // recipient account isn't known until the invite link is used to create one.
+  recipient_account_id String?
+  recipient_account    Account?  @relation("GrantRecipient", fields: [recipient_account_id], references: [account_id])
+  // Set only for the no-account-yet path — the invited email address.
+  recipient_email      String?
+  // Set when the recipient completes account creation via the invite link (VE
+  // status is conferred at that moment). Null + no account + >28d = expired.
+  claimed_at           DateTime?
   granted_at   DateTime  @default(now())
   refreshed_at DateTime? // Set 1 month after use (token refresh rule).
 
@@ -395,8 +403,14 @@ model AccountFlag {
   related_token_grant    TokenGrant? @relation("FlagTokenGrant", fields: [related_token_grant_id], references: [grant_id])
   status     FlagStatus @default(pending)
   reason     String
+  // Primary moderator who initiates the review.
   reviewed_by String?
   reviewer    Account?   @relation("FlagReviewer", fields: [reviewed_by], references: [account_id])
+  // Second moderator who independently weighs in. A ve_conduct_review ESS lock
+  // fires only when BOTH reviewers are set (two distinct accounts) AND status is
+  // confirmed; a disagreeing secondary sets status = dismissed instead.
+  secondary_reviewed_by String?
+  secondary_reviewer    Account? @relation("FlagSecondaryReviewer", fields: [secondary_reviewed_by], references: [account_id])
   created_at  DateTime   @default(now())
   resolved_at DateTime?
 

@@ -29,12 +29,14 @@ describe("Standing Scores — drift, locking, restoration", () => {
   // --- drift ----------------------------------------------------------------
 
   it("computes cumulative multi-week drift in one read and stops at 50", () => {
-    // Pure closed-form checks.
-    expect(driftedValue(45, 3)).toBe(48); // below 50, +1/week
+    // Pure closed-form checks of the per-week table.
+    expect(driftedValue(45, 3)).toBe(48); // 1..49, +1/week
     expect(driftedValue(48, 5)).toBe(50); // stops at 50, no overshoot
-    expect(driftedValue(55, 3)).toBe(52); // above 50, -1/week
+    expect(driftedValue(48, 3)).toBe(50); // 48->49->50->50 over 3 weeks, not 51
+    expect(driftedValue(55, 3)).toBe(52); // 51..100, -1/week
     expect(driftedValue(52, 9)).toBe(50); // stops at 50
-    expect(driftedValue(50, 4)).toBe(50); // at 50, no-op
+    expect(driftedValue(50, 4)).toBe(50); // 50 -> +0
+    expect(driftedValue(0, 3)).toBe(0); // 0 -> +0 (locked floor, no drift up)
     expect(driftedValue(30, 0)).toBe(30); // no elapsed weeks
   });
 

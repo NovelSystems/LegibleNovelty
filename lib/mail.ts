@@ -176,3 +176,18 @@ export function sendPeerTokenRefreshed(to: string, optOuts: string[]) {
     optOuts,
   });
 }
+
+// Invite to create an account and claim a peer token (no-account-yet grant path,
+// same idea as Stage 1's Connection invite link). The recipient has no account
+// yet, so there are no opt-out preferences to consult.
+export function sendPeerTokenInvite(to: string, grantId: string) {
+  return sendEmail({
+    to,
+    subject: "You have been invited to become a Verified Educator",
+    text:
+      `A Verified Educator has granted you a peer token. Create your account ` +
+      `within 28 days to claim Verified Educator status: ` +
+      `${APP_URL}/claim-ve-token?grant=${grantId}`,
+    category: NotificationCategory.PEER_TOKEN_RECEIVED,
+  });
+}

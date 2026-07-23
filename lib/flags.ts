@@ -61,7 +61,8 @@ export async function flagVeConductReview(args: {
   });
 }
 
-// Moderator confirms a flag. The consequence branches HARD on flag_type.
+// Confirm a bad_peer_token_grant flag (single-moderator). ve_conduct_review is
+// NOT confirmed here — it uses the two-moderator flow below.
 export async function confirmFlag(flagId: string, moderatorAccountId: string) {
   const flag = await prisma.accountFlag.findUniqueOrThrow({
     where: { flag_id: flagId },
@@ -69,8 +70,13 @@ export async function confirmFlag(flagId: string, moderatorAccountId: string) {
   if (flag.status !== "pending") {
     throw new FlagError("Flag is not pending.");
   }
+  if (flag.flag_type === "ve_conduct_review") {
+    throw new FlagError(
+      "ve_conduct_review requires the two-moderator flow (initiateConductReview then secondaryConfirmConductReview).",
+    );
+  }
 
-  const updated = await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     const row = await tx.accountFlag.update({
       where: { flag_id: flagId },
       data: {
@@ -80,17 +86,18 @@ export async function confirmFlag(flagId: string, moderatorAccountId: string) {
       },
     });
 
-    if (flag.flag_type === "bad_peer_token_grant") {
-      // AUTOMATIC status correction on the RECIPIENT of the bad grant. Not a
-      // discretionary revocation — the grant was invalid.
-      if (!flag.related_token_grant_id) {
-        throw new FlagError(
-          "bad_peer_token_grant flag is missing its related TokenGrant.",
-        );
-      }
-      const grant = await tx.tokenGrant.findUniqueOrThrow({
-        where: { grant_id: flag.related_token_grant_id },
-      });
+    // AUTOMATIC status correction on the RECIPIENT of the bad grant.
+    if (!flag.related_token_grant_id) {
+      throw new FlagError(
+        "bad_peer_token_grant flag is missing its related TokenGrant.",
+      );
+    }
+    const grant = await tx.tokenGrant.findUniqueOrThrow({
+      where: { grant_id: flag.related_token_grant_id },
+    });
+    // recipient_account_id is nullable (grant-to-email path); a disputed grant
+    // that conferred VE always has a recipient account, but guard anyway.
+    if (grant.recipient_account_id) {
       await tx.account.update({
         where: { account_id: grant.recipient_account_id },
         data: { ve_status: false },
@@ -99,24 +106,91 @@ export async function confirmFlag(flagId: string, moderatorAccountId: string) {
 
     return row;
   });
+}
 
-  // BEHAVIOR CHANGE vs. Stage 1 Task 7 (flagged in the delivery summary): the
-  // Standing Scores brief supersedes Stage 1's "confirmation does not revoke"
-  // asymmetry — a confirmed ve_conduct_review now DIRECTLY triggers an ESS lock,
-  // which itself sets ve_status/lnc_status false. Done after the flag
-  // transaction (the lock runs its own transaction), attributed to the
-  // confirming moderator with the flag's reason as the required explanation.
-  if (flag.flag_type === "ve_conduct_review") {
-    await lockStandingScoreDirectly({
-      accountId: flag.account_id,
-      scoreType: "ESS",
-      eventType: "ve_conduct_review_confirmed",
-      moderatorAccountId,
-      explanation: flag.reason,
-    });
+// --- Two-moderator ve_conduct_review (Standing Scores correction) ------------
+//
+// A ve_conduct_review requires TWO distinct moderators. The primary INITIATES
+// (reviewed_by); a second moderator independently weighs in. The ESS lock fires
+// only when both reviewers are set (distinct) AND status is confirmed. If the
+// secondary disagrees, they dismiss instead — nothing else needed. A single
+// moderator's review alone never locks ESS.
+
+// Primary moderator initiates the review.
+export async function initiateConductReview(
+  flagId: string,
+  primaryModeratorAccountId: string,
+) {
+  const flag = await prisma.accountFlag.findUniqueOrThrow({ where: { flag_id: flagId } });
+  if (flag.flag_type !== "ve_conduct_review") {
+    throw new FlagError("initiateConductReview applies to ve_conduct_review flags.");
   }
+  if (flag.status !== "pending") throw new FlagError("Flag is not pending.");
+  if (flag.reviewed_by) throw new FlagError("Review already initiated.");
+  return prisma.accountFlag.update({
+    where: { flag_id: flagId },
+    data: { reviewed_by: primaryModeratorAccountId }, // status stays pending
+  });
+}
+
+async function loadInitiatedConductReview(flagId: string, secondaryModeratorAccountId: string) {
+  const flag = await prisma.accountFlag.findUniqueOrThrow({ where: { flag_id: flagId } });
+  if (flag.flag_type !== "ve_conduct_review") {
+    throw new FlagError("Not a ve_conduct_review flag.");
+  }
+  if (flag.status !== "pending") throw new FlagError("Flag is not pending.");
+  if (!flag.reviewed_by) throw new FlagError("Primary review has not been initiated.");
+  if (flag.secondary_reviewed_by) throw new FlagError("Secondary review already recorded.");
+  if (flag.reviewed_by === secondaryModeratorAccountId) {
+    throw new FlagError("The secondary reviewer must be a different moderator.");
+  }
+  return flag;
+}
+
+// Secondary moderator AGREES → status confirmed → ESS lock fires (both reviewers
+// set + distinct + confirmed).
+export async function secondaryConfirmConductReview(
+  flagId: string,
+  secondaryModeratorAccountId: string,
+) {
+  const flag = await loadInitiatedConductReview(flagId, secondaryModeratorAccountId);
+  const updated = await prisma.accountFlag.update({
+    where: { flag_id: flagId },
+    data: {
+      secondary_reviewed_by: secondaryModeratorAccountId,
+      status: "confirmed",
+      resolved_at: new Date(),
+    },
+  });
+
+  // Both reviewers set (distinct) and confirmed → trigger the ESS lock, which
+  // itself sets ve_status/lnc_status false. Attributed to the confirming
+  // (secondary) moderator with the flag's reason as the required explanation.
+  await lockStandingScoreDirectly({
+    accountId: flag.account_id,
+    scoreType: "ESS",
+    eventType: "ve_conduct_review_confirmed",
+    moderatorAccountId: secondaryModeratorAccountId,
+    explanation: flag.reason,
+  });
 
   return updated;
+}
+
+// Secondary moderator DISAGREES → status dismissed, no lock.
+export async function secondaryDismissConductReview(
+  flagId: string,
+  secondaryModeratorAccountId: string,
+) {
+  const flag = await loadInitiatedConductReview(flagId, secondaryModeratorAccountId);
+  return prisma.accountFlag.update({
+    where: { flag_id: flag.flag_id },
+    data: {
+      secondary_reviewed_by: secondaryModeratorAccountId,
+      status: "dismissed",
+      resolved_at: new Date(),
+    },
+  });
 }
 
 export async function dismissFlag(flagId: string, moderatorAccountId: string) {

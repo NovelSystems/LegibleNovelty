@@ -36,13 +36,23 @@ function num(v: Prisma.Decimal | number): number {
 
 // --- Drift -------------------------------------------------------------------
 
-// Closed-form cumulative drift: below 50 climbs +1/week toward 50, above 50
-// falls -1/week toward 50, never overshooting; at 50 it's a no-op. Correct for
-// any number of elapsed weeks in a single read (a 3-week gap catches up all 3).
+// Passive weekly drift as a plain per-week table applied directly to the value,
+// with NO separate is-locked condition:
+//
+//   0        -> +0     (0 already means locked — handled for free by arithmetic)
+//   1..49    -> +1
+//   50       -> +0
+//   51..100  -> -1
+//
+// Closed form over any number of elapsed weeks, never overshooting 50 (e.g.
+// 48 over 3 weeks is 48->49->50->50 = 50, not 51). A value of exactly 0 is a
+// fixed point, so a locked-at-0 score stays put without any lock check.
 export function driftedValue(value: number, weeks: number): number {
-  if (weeks <= 0 || value === DRIFT_TARGET) return value;
-  if (value < DRIFT_TARGET) return round1(Math.min(DRIFT_TARGET, value + weeks));
-  return round1(Math.max(DRIFT_TARGET, value - weeks));
+  if (weeks <= 0) return value;
+  if (value <= 0) return 0; // 0 -> +0
+  if (value === DRIFT_TARGET) return value; // 50 -> +0
+  if (value < DRIFT_TARGET) return round1(Math.min(DRIFT_TARGET, value + weeks)); // 1..49 -> +1/wk
+  return round1(Math.max(DRIFT_TARGET, value - weeks)); // >50 -> -1/wk
 }
 
 async function getOrCreateRow(
@@ -67,8 +77,10 @@ async function getOrCreateRow(
 }
 
 // Apply lazy weekly drift and PERSIST (value + a fresh anchor advanced by whole
-// weeks, preserving the sub-week remainder). Drift is PAUSED while locked — a
-// locked score doesn't passively recover; only restoration unlocks it.
+// weeks, preserving the sub-week remainder). There is NO separate is-locked
+// check: the drift table's 0 -> +0 fixed point keeps a locked-at-0 score put,
+// and unlock is governed by locked_at (cleared only by restoration), never by
+// the value, so drift is safe to apply unconditionally.
 async function readWithDrift(
   db: Db,
   accountId: string,
@@ -76,7 +88,6 @@ async function readWithDrift(
   now: Date,
 ): Promise<StandingScore> {
   const row = await getOrCreateRow(db, accountId, scoreType, now);
-  if (row.locked_at) return row;
 
   const elapsed = now.getTime() - row.last_drift_computed_at.getTime();
   const weeks = Math.floor(elapsed / WEEK_MS);

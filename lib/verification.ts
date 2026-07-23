@@ -1,6 +1,12 @@
 import { prisma } from "@/lib/prisma";
-import type { RejectionReasonCode } from "@prisma/client";
-import { sendPeerTokenReceived, sendPeerTokenRefreshed, sendVeDecision } from "@/lib/mail";
+import type { RejectionReasonCode, TokenGrant } from "@prisma/client";
+import {
+  sendPeerTokenInvite,
+  sendPeerTokenReceived,
+  sendPeerTokenRefreshed,
+  sendVeDecision,
+} from "@/lib/mail";
+import { signup, type SignupArgs } from "@/lib/accounts";
 
 // Verified Educator verification — Phase 1 manual only (brief Task 6,
 // Section 4.1). Backed by real VerificationApplication (Path 1) and TokenGrant
@@ -138,10 +144,14 @@ export async function rejectApplication(args: ReviewRejectArgs) {
 export async function grantPeerToken(
   grantingAccountId: string,
   recipientAccountId: string,
+  now: Date = new Date(),
 ) {
   if (grantingAccountId === recipientAccountId) {
     throw new VerificationError("A token cannot be granted to oneself.");
   }
+  // Free the token first if a prior email invite lapsed unclaimed (no-op
+  // otherwise, so the instant-grant behavior is unchanged in the common case).
+  await reconcileExpiredPeerTokenGrants(grantingAccountId, now);
   const granter = await prisma.account.findUniqueOrThrow({
     where: { account_id: grantingAccountId },
   });
@@ -184,6 +194,138 @@ export async function grantPeerToken(
     );
   }
   return result.grant;
+}
+
+// --- Grant to an email with no account yet (invite-link path) ----------------
+
+const TOKEN_INVITE_EXPIRY_MS = 28 * 24 * 60 * 60 * 1000; // "28 days".
+
+// A pending grant is one made to an email that hasn't been claimed by creating
+// an account yet. It EXPIRES if unclaimed 28 days after the grant.
+function isPendingInvite(grant: TokenGrant): boolean {
+  return grant.recipient_account_id === null && grant.claimed_at === null;
+}
+export function isPeerTokenInviteExpired(grant: TokenGrant, now: Date = new Date()): boolean {
+  return (
+    isPendingInvite(grant) &&
+    now.getTime() - grant.granted_at.getTime() >= TOKEN_INVITE_EXPIRY_MS
+  );
+}
+
+// Lazily reclaim a granter's token when their outstanding invite has expired
+// unclaimed (computed at check time — no scheduler, no status enum). Only the
+// granter's MOST RECENT grant can be holding the current token, so we only free
+// when that one is an expired pending invite; this stays correct after the
+// granter later grants again.
+export async function reconcileExpiredPeerTokenGrants(
+  grantingAccountId: string,
+  now: Date = new Date(),
+): Promise<boolean> {
+  const latest = await prisma.tokenGrant.findFirst({
+    where: { granting_account_id: grantingAccountId },
+    orderBy: { granted_at: "desc" },
+  });
+  if (!latest || !isPeerTokenInviteExpired(latest, now)) return false;
+  await prisma.account.update({
+    where: { account_id: grantingAccountId },
+    data: { ve_token_available: true }, // As if the grant never happened.
+  });
+  return true;
+}
+
+// Grant a peer token to an EMAIL ADDRESS. If an account with that email already
+// exists, the grant is INSTANT (unchanged behavior). If not, a pending invite is
+// created and an invite-link email is sent; VE status is conferred only when the
+// recipient claims it by creating an account (claimPeerTokenGrant).
+export async function grantPeerTokenByEmail(
+  grantingAccountId: string,
+  recipientEmail: string,
+  now: Date = new Date(),
+) {
+  // Reclaim any expired outstanding invite first, so a granter whose previous
+  // invite lapsed can grant again.
+  await reconcileExpiredPeerTokenGrants(grantingAccountId, now);
+
+  const existing = await prisma.account.findUnique({
+    where: { email: recipientEmail },
+    select: { account_id: true },
+  });
+  if (existing) {
+    // Existing account → instant grant, exactly as originally built.
+    return { instant: true as const, grant: await grantPeerToken(grantingAccountId, existing.account_id) };
+  }
+
+  // No account yet → pending invite.
+  const granter = await prisma.account.findUniqueOrThrow({
+    where: { account_id: grantingAccountId },
+  });
+  if (!granter.ve_status) throw new VerificationError("Only a Verified Educator can grant a token.");
+  if (!granter.ve_token_available) throw new VerificationError("You have no token available to grant.");
+
+  const grant = await prisma.$transaction(async (tx) => {
+    const g = await tx.tokenGrant.create({
+      data: {
+        granting_account_id: grantingAccountId,
+        recipient_account_id: null, // Unknown until the link is used.
+        recipient_email: recipientEmail,
+        granted_at: now,
+      },
+    });
+    // Consume the granter's token now; it's returned if the invite expires.
+    await tx.account.update({
+      where: { account_id: grantingAccountId },
+      data: { ve_token_available: false },
+    });
+    return g;
+  });
+
+  await sendPeerTokenInvite(recipientEmail, grant.grant_id);
+  return { instant: false as const, grant };
+}
+
+// The recipient claims a pending invite by creating their account via the link.
+// VE status is conferred at THIS moment (claimed_at set), not at grant time.
+// Reuses Stage 1's signup() for account creation (the Connection invite-link is
+// not factored as a reusable email-invite primitive, so this follows the same
+// pattern rather than duplicating a non-existent abstraction).
+export async function claimPeerTokenGrant(
+  grantId: string,
+  signupArgs: SignupArgs,
+  now: Date = new Date(),
+) {
+  const grant = await prisma.tokenGrant.findUniqueOrThrow({ where: { grant_id: grantId } });
+  if (!isPendingInvite(grant)) {
+    throw new VerificationError("This grant is not an unclaimed invite.");
+  }
+  if (isPeerTokenInviteExpired(grant, now)) {
+    throw new VerificationError("This invite has expired.");
+  }
+  if (grant.recipient_email && signupArgs.email !== grant.recipient_email) {
+    throw new VerificationError("The account email must match the invited address.");
+  }
+
+  // Create the recipient's account (Stage 1 signup; sends its own verification).
+  const account = await signup(signupArgs);
+
+  const linked = await prisma.$transaction(async (tx) => {
+    await tx.tokenGrant.update({
+      where: { grant_id: grantId },
+      data: { recipient_account_id: account.account_id, claimed_at: now },
+    });
+    return tx.account.update({
+      where: { account_id: account.account_id },
+      data: {
+        ve_status: true,
+        ve_token_available: true,
+        ve_granted_by_account_id: grant.granting_account_id,
+      },
+    });
+  });
+
+  if (linked.email) {
+    await sendPeerTokenReceived(linked.email, linked.notification_opt_outs);
+  }
+  return { account: linked, grantId };
 }
 
 // A used token refreshes 1 month after use. Batch: find grants older than the

@@ -7,7 +7,11 @@ import {
   lockStandingScoreDirectly,
   StandingScoreError,
 } from "@/lib/standing-scores";
-import { flagVeConductReview, confirmFlag } from "@/lib/flags";
+import {
+  flagVeConductReview,
+  initiateConductReview,
+  secondaryConfirmConductReview,
+} from "@/lib/flags";
 import { makeAccount } from "./helpers/factory";
 import { makeTaxonomyPair, draftSeed, publishSeedFixture } from "./helpers/seed-factory";
 
@@ -80,16 +84,18 @@ describe("Standing Scores retrofit into the Seed Editor + flag wiring", () => {
     expect(rev.made_as_moderator).toBe(true);
   });
 
-  it("a confirmed ve_conduct_review flag directly triggers an ESS lock (supersedes Stage 1 Task 7)", async () => {
+  it("a two-moderator confirmed ve_conduct_review triggers an ESS lock (supersedes Stage 1 Task 7)", async () => {
     const educator = await makeAccount({ ve: true });
     await prisma.account.update({ where: { account_id: educator.account_id }, data: { lnc_status: true } });
-    const moderator = await makeAccount();
+    const primary = await makeAccount();
+    const secondary = await makeAccount();
 
     const flag = await flagVeConductReview({
       accountId: educator.account_id,
       reason: "Repeated conduct violations in reviews.",
     });
-    await confirmFlag(flag.flag_id, moderator.account_id);
+    await initiateConductReview(flag.flag_id, primary.account_id);
+    await secondaryConfirmConductReview(flag.flag_id, secondary.account_id);
 
     // ESS lock fired: both credentials revoked and the ESS score is locked.
     const after = await prisma.account.findUniqueOrThrow({ where: { account_id: educator.account_id } });
@@ -97,11 +103,11 @@ describe("Standing Scores retrofit into the Seed Editor + flag wiring", () => {
     expect(after.lnc_status).toBe(false);
     expect(await isScoreLocked(educator.account_id, "ESS")).toBe(true);
 
-    // The lock event carries the confirming moderator + the flag's reason.
+    // The lock event carries the confirming (secondary) moderator + the reason.
     const ev = await prisma.standingScoreEvent.findFirstOrThrow({
       where: { account_id: educator.account_id, event_type: "ve_conduct_review_confirmed" },
     });
-    expect(ev.moderator_account_id).toBe(moderator.account_id);
+    expect(ev.moderator_account_id).toBe(secondary.account_id);
     expect(ev.explanation).toContain("conduct");
   });
 });
