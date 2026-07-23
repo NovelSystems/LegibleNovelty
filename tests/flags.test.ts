@@ -44,7 +44,11 @@ describe("Peer token accountability (Task 7) — the two paths differ", () => {
     expect(recipAfter.ve_status).toBe(false);
   });
 
-  it("confirming ve_conduct_review does NOT change ve_status; revoke is separate", async () => {
+  it("confirming ve_conduct_review triggers an ESS lock (Standing Scores supersedes Stage 1 Task 7)", async () => {
+    // BEHAVIOR CHANGE: the Standing Scores brief overrides Stage 1's original
+    // asymmetry. A confirmed ve_conduct_review now directly triggers an ESS
+    // lock, which itself revokes ve_status/lnc_status — so confirmation is no
+    // longer a no-op on status, and no separate revoke step is needed.
     const educator = await makeAccount({ ve: true });
     const moderator = await makeAccount();
 
@@ -56,17 +60,17 @@ describe("Peer token accountability (Task 7) — the two paths differ", () => {
 
     await confirmFlag(flag.flag_id, moderator.account_id);
 
-    // Confirmation alone leaves ve_status untouched.
-    let after = await prisma.account.findUniqueOrThrow({
+    const after = await prisma.account.findUniqueOrThrow({
       where: { account_id: educator.account_id },
     });
-    expect(after.ve_status).toBe(true);
+    expect(after.ve_status).toBe(false); // Revoked via the ESS lock.
+    expect(after.lnc_status).toBe(false);
 
-    // A SEPARATE explicit Moderator action is required to revoke.
+    // revokeVeStatus still exists as an explicit action, and is idempotent here.
     await revokeVeStatus(educator.account_id);
-    after = await prisma.account.findUniqueOrThrow({
+    const again = await prisma.account.findUniqueOrThrow({
       where: { account_id: educator.account_id },
     });
-    expect(after.ve_status).toBe(false);
+    expect(again.ve_status).toBe(false);
   });
 });

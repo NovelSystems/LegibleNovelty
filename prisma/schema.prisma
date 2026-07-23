@@ -215,6 +215,12 @@ model Account {
   seed_draft_comments  SeedDraftComment[]
   seed_revisions       SeedRevision[]    @relation("RevisionEditor")
   proposed_topics      Taxonomy[] @relation("TaxonomyProposer")
+  // Standing Scores (cross-cutting governance).
+  standing_scores        StandingScore[]
+  standing_score_events  StandingScoreEvent[] @relation("EventAccount")
+  moderated_score_events StandingScoreEvent[] @relation("EventModerator")
+  seed_reports_filed     SeedReport[]         @relation("ReportReporter")
+  seed_reports_resolved  SeedReport[]         @relation("ReportResolver")
 
   // email_hash and display_name_hash are the two indexed lookup columns the
   // brief requires (reclaim / reuse-blocking hit them on every signup).
@@ -548,6 +554,7 @@ model LearningSeed {
   invites      SeedDraftInvite[]
   comments     SeedDraftComment[]
   revisions    SeedRevision[]
+  reports      SeedReport[]
   chain_edges_out SeedChain[] @relation("ChainFrom")
   chain_edges_in  SeedChain[] @relation("ChainTo")
 
@@ -667,4 +674,88 @@ model SeedRevision {
   @@unique([seed_id, revision_number])
   @@index([seed_id])
   @@index([editor_account_id])
+}
+
+// ===========================================================================
+// Standing Scores (ESS / DSS / CSS) — cross-cutting content-governance
+// infrastructure (source: Content Governance Policy Section 10). One shared
+// mechanic (scale, weekly drift, 0-lock, restoration) across three score types,
+// modeled with a score_type discriminator rather than three parallel tables.
+// Both tables are internal moderation-triage data, invisible to the account
+// holder (Section 10.1).
+// ===========================================================================
+
+enum StandingScoreType {
+  ESS // Educator Standing Score
+  DSS // Developer Standing Score
+  CSS // Community Standing Score
+}
+
+model StandingScore {
+  standing_score_id String            @id @default(uuid())
+  account_id        String
+  account           Account           @relation(fields: [account_id], references: [account_id])
+  score_type        StandingScoreType
+  // MUST be decimal (not integer): DSS has a +0.1 trigger an integer column
+  // would silently round away.
+  current_value     Decimal           @db.Decimal(6, 2)
+  locked_at         DateTime? // Set when the value hits 0 (or a direct trigger).
+  // Drives the lazy weekly-drift calculation (Task 2); not a display field.
+  last_drift_computed_at DateTime
+
+  // One row per (account, score_type) pair.
+  @@unique([account_id, score_type])
+  @@index([account_id])
+}
+
+// The Historical Infraction Record (Section 10.6). APPEND-ONLY — rows are never
+// updated or deleted.
+model StandingScoreEvent {
+  event_id   String            @id @default(uuid())
+  account_id String
+  account    Account           @relation("EventAccount", fields: [account_id], references: [account_id])
+  score_type StandingScoreType
+  point_delta Decimal          @db.Decimal(6, 2) // Positive or negative.
+  // Extensible label, e.g. ve_token_rescinded, seed_report_dss_egregious, ess_lock.
+  event_type String
+  // moderator_account_id and explanation are required TOGETHER whenever an entry
+  // results from a moderator decision; neither is required for a system-triggered
+  // (e.g. numeric 0-floor lock) event. Enforced in lib/standing-scores.ts.
+  moderator_account_id String?
+  moderator            Account? @relation("EventModerator", fields: [moderator_account_id], references: [account_id])
+  explanation          String?
+  created_at           DateTime @default(now())
+
+  @@index([account_id])
+  @@index([score_type])
+}
+
+// ===========================================================================
+// SeedReport — the free-text vandalism report path the Seed Editor lacked
+// (Standing Scores Task 5). Deliberately lighter than Module's eventual report
+// system: no auto-escalation ladder. Resolution routes through the already-built
+// SeedRevision moderator-edit path — there is no separate takedown mechanism.
+// ===========================================================================
+
+enum SeedReportStatus {
+  pending
+  resolved
+}
+
+model SeedReport {
+  report_id           String           @id @default(uuid())
+  seed_id             String
+  seed                LearningSeed     @relation(fields: [seed_id], references: [seed_id])
+  reporter_account_id String
+  reporter            Account          @relation("ReportReporter", fields: [reporter_account_id], references: [account_id])
+  reason              String
+  status              SeedReportStatus @default(pending)
+  created_at          DateTime         @default(now())
+  resolved_at         DateTime?
+  resolved_by         String? // Moderator who resolved it.
+  resolver            Account?         @relation("ReportResolver", fields: [resolved_by], references: [account_id])
+
+  @@index([seed_id])
+  @@index([reporter_account_id])
+  @@index([status])
 }

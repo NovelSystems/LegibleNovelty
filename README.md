@@ -75,6 +75,14 @@ complete.** Everything below them is designed and specified, not yet implemented
   return-to-Draft), and the anti-spam publish quota (3 concurrent pre-endorsement → 10/day
   after, resetting at midnight `America/Los_Angeles`). Module Editor and Lesson Planner remain
   deferred; Endorsement itself is Library's.
+- ✅ **Standing Scores (ESS / DSS / CSS) — cross-cutting governance.** One shared
+  `StandingScore` table (score_type discriminator, decimal value) with lazy read-time weekly
+  drift (no scheduler), a 0-lock with per-score consequences, uniform restoration to 5, and an
+  append-only `StandingScoreEvent` infraction record. Wired against what exists: ESS lock
+  revokes `ve_status`/`lnc_status` (and a confirmed `ve_conduct_review` flag now triggers it
+  directly); DSS lock is retrofitted into the Seed Editor authoring/publish path; a new
+  `SeedReport` path closes the free-text vandalism gap, resolving through the existing
+  SeedRevision moderator-edit system. Module Editor / Library triggers remain unwired.
 - ⬜ **Later subsystems.** Library (browse/search/reading, endorsement, lesson plans),
   Workshop (seed & module authoring, commission marketplace, moderation), Certification Center
   (the LNC mini-LMS), Communication (comments, Big Questions, forum), Notification, and

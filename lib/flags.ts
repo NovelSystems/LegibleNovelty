@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { lockStandingScoreDirectly } from "@/lib/standing-scores";
 
 // Peer token accountability and VE status review (brief Task 7), backed by the
 // generic AccountFlag entity.
@@ -69,8 +70,8 @@ export async function confirmFlag(flagId: string, moderatorAccountId: string) {
     throw new FlagError("Flag is not pending.");
   }
 
-  return prisma.$transaction(async (tx) => {
-    const updated = await tx.accountFlag.update({
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.accountFlag.update({
       where: { flag_id: flagId },
       data: {
         status: "confirmed",
@@ -95,11 +96,27 @@ export async function confirmFlag(flagId: string, moderatorAccountId: string) {
         data: { ve_status: false },
       });
     }
-    // ve_conduct_review: NO automatic ve_status change. A Moderator must call
-    // revokeVeStatus() separately if warranted.
 
-    return updated;
+    return row;
   });
+
+  // BEHAVIOR CHANGE vs. Stage 1 Task 7 (flagged in the delivery summary): the
+  // Standing Scores brief supersedes Stage 1's "confirmation does not revoke"
+  // asymmetry — a confirmed ve_conduct_review now DIRECTLY triggers an ESS lock,
+  // which itself sets ve_status/lnc_status false. Done after the flag
+  // transaction (the lock runs its own transaction), attributed to the
+  // confirming moderator with the flag's reason as the required explanation.
+  if (flag.flag_type === "ve_conduct_review") {
+    await lockStandingScoreDirectly({
+      accountId: flag.account_id,
+      scoreType: "ESS",
+      eventType: "ve_conduct_review_confirmed",
+      moderatorAccountId,
+      explanation: flag.reason,
+    });
+  }
+
+  return updated;
 }
 
 export async function dismissFlag(flagId: string, moderatorAccountId: string) {
