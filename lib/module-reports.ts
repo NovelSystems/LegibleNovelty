@@ -28,12 +28,14 @@ export class ModuleReportError extends Error {
   }
 }
 
-// The single DSS-tier-application logic shared by BOTH the report-rejection path
-// and the manual-takedown path (Module Editor fix). Severity classification is
-// the moderator's OPTIONAL call on both paths: if none is given, no DSS effect
-// is applied at all. What drives DSS is the moderator's substantiated judgment
-// about the content, not which path surfaced it — so the two call the SAME
-// function, never two versions.
+// The single DSS-tier-application logic shared by BOTH the report path and the
+// manual-takedown path (Module Editor). It ALWAYS records a StandingScoreEvent
+// for the moderator's decision — 0-delta when no severity is classified, not
+// skipped — since every moderator retain/reject decision must leave an
+// accountability record (moderator_account_id + required explanation) INDEPENDENT
+// of point value. Severity classification stays the moderator's optional call;
+// what drives the DSS delta is the moderator's substantiated judgment about the
+// content, not which path surfaced it. One shared function, never two versions.
 async function applyAuthorDssTierWithin(
   tx: Prisma.TransactionClient,
   args: {
@@ -44,14 +46,13 @@ async function applyAuthorDssTierWithin(
   },
   now: Date,
 ) {
-  if (!args.severity) return; // No classification → no DSS effect.
   await applyStandingScoreDeltaWithin(
     tx,
     {
       accountId: args.authorAccountId,
       scoreType: "DSS",
-      delta: DSS_TIER[args.severity],
-      eventType: `module_dss_${args.severity}`,
+      delta: args.severity ? DSS_TIER[args.severity] : 0, // 0-delta when unclassified
+      eventType: args.severity ? `module_dss_${args.severity}` : "module_dss_unclassified",
       moderatorAccountId: args.moderatorAccountId,
       explanation: args.explanation,
     },

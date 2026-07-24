@@ -177,11 +177,47 @@ describe("Module Editor — reports, takedown, governance", () => {
     expect(authorScoreEvents.every((e) => e.score_type === "DSS")).toBe(true);
   });
 
-  it("applies NO author DSS on a manual takedown with no severity classification", async () => {
+  it("still records a 0-delta author DSS event on a manual takedown with no severity classification", async () => {
     const { module, author } = await publishedModule();
     const mod = await makeAccount();
     await moderatorManualTakedown(module.module_id, mod.account_id, "taking down pending review");
-    expect(value(await getStandingScore(author.account_id, "DSS"))).toBe(50); // untouched
+
+    // 0-delta: the value is untouched...
+    expect(value(await getStandingScore(author.account_id, "DSS"))).toBe(50);
+    // ...but the retain/reject decision STILL leaves an accountability record —
+    // a StandingScoreEvent is created even when no severity was classified.
+    const dssEv = await prisma.standingScoreEvent.findFirstOrThrow({
+      where: { account_id: author.account_id, event_type: "module_dss_unclassified" },
+    });
+    expect(dssEv.moderator_account_id).toBe(mod.account_id);
+    expect(dssEv.explanation).toBe("taking down pending review");
+    expect(Number(dssEv.point_delta)).toBe(0);
+  });
+
+  it("still records a 0-delta author DSS event on a report-path rejection with no severity classification", async () => {
+    const { module, author } = await publishedModule();
+    const reporter = await makeAccount();
+    const mod = await makeAccount();
+    await fileModuleReport({ moduleId: module.module_id, reporterAccountId: reporter.account_id, reason: "off charter" });
+
+    await moderatorReviewModule({
+      moduleId: module.module_id,
+      moderatorAccountId: mod.account_id,
+      decision: "reject",
+      citedClause: "charter",
+      sectionReference: "page 1",
+      rationale: "out of charter, severity not classified",
+      // No severity given.
+    });
+
+    // Author value untouched (0 delta) but the decision still creates an event.
+    expect(value(await getStandingScore(author.account_id, "DSS"))).toBe(50);
+    const dssEv = await prisma.standingScoreEvent.findFirstOrThrow({
+      where: { account_id: author.account_id, event_type: "module_dss_unclassified" },
+    });
+    expect(dssEv.moderator_account_id).toBe(mod.account_id);
+    expect(dssEv.explanation).toBe("out of charter, severity not classified");
+    expect(Number(dssEv.point_delta)).toBe(0);
   });
 
   it("shares the 3/day report cap across seeds and modules", async () => {
