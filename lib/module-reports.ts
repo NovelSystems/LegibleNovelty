@@ -36,23 +36,39 @@ export class ModuleReportError extends Error {
 // of point value. Severity classification stays the moderator's optional call;
 // what drives the DSS delta is the moderator's substantiated judgment about the
 // content, not which path surfaced it. One shared function, never two versions.
+//
+// The event_type label lets a moderator scan DSS history at a glance (Section
+// 10.1) and tell three 0-or-negative-delta outcomes apart without opening the
+// linked ModuleReviewDecision for each: a RETAIN ("module_dss_retained", 0
+// delta — no infraction), a reject with no severity classified
+// ("module_dss_unclassified", 0 delta — flagged but uncharacterized), and a
+// severity-classified reject ("module_dss_<severity>", tier delta).
 async function applyAuthorDssTierWithin(
   tx: Prisma.TransactionClient,
   args: {
     authorAccountId: string;
-    severity?: ModuleSeverity;
+    decision: "retain" | "reject";
+    severity?: ModuleSeverity; // reject only
     moderatorAccountId: string;
     explanation: string;
   },
   now: Date,
 ) {
+  const eventType =
+    args.decision === "retain"
+      ? "module_dss_retained"
+      : args.severity
+        ? `module_dss_${args.severity}`
+        : "module_dss_unclassified";
   await applyStandingScoreDeltaWithin(
     tx,
     {
       accountId: args.authorAccountId,
       scoreType: "DSS",
-      delta: args.severity ? DSS_TIER[args.severity] : 0, // 0-delta when unclassified
-      eventType: args.severity ? `module_dss_${args.severity}` : "module_dss_unclassified",
+      // A retain is never an infraction; a reject applies its tier (0 when
+      // unclassified). Delta is 0 in both the retain and unclassified cases.
+      delta: args.decision === "reject" && args.severity ? DSS_TIER[args.severity] : 0,
+      eventType,
       moderatorAccountId: args.moderatorAccountId,
       explanation: args.explanation,
     },
@@ -196,6 +212,7 @@ export async function moderatorReviewModule(
       tx,
       {
         authorAccountId: module.author_account_id,
+        decision: args.decision,
         // Only a rejection carries a severity tier; a retain is always 0-delta.
         severity: args.decision === "reject" ? args.severity : undefined,
         moderatorAccountId: args.moderatorAccountId,
@@ -264,6 +281,7 @@ export async function moderatorManualTakedown(
       tx,
       {
         authorAccountId: module.author_account_id,
+        decision: "reject", // a manual takedown is always a rejection
         severity: opts.severity,
         moderatorAccountId,
         explanation: rationale,

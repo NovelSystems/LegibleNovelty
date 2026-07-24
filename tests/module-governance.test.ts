@@ -145,10 +145,11 @@ describe("Module Editor — reports, takedown, governance", () => {
     expect(cssEv.moderator_account_id).toBe(mod.account_id);
 
     // ADDITIVE: the retain decision ALSO leaves a 0-delta record on the author's
-    // DSS history — both events exist, not one or the other.
+    // DSS history — both events exist, not one or the other. A retain carries
+    // its OWN event_type, distinct from an unclassified rejection.
     expect(value(await getStandingScore(author.account_id, "DSS"))).toBe(50); // untouched
     const dssEv = await prisma.standingScoreEvent.findFirstOrThrow({
-      where: { account_id: author.account_id, event_type: "module_dss_unclassified" },
+      where: { account_id: author.account_id, event_type: "module_dss_retained" },
     });
     expect(dssEv.moderator_account_id).toBe(mod.account_id);
     expect(dssEv.explanation).toBe("content is within charter");
@@ -171,7 +172,7 @@ describe("Module Editor — reports, takedown, governance", () => {
 
     expect(value(await getStandingScore(author.account_id, "DSS"))).toBe(50); // 0 delta
     const dssEv = await prisma.standingScoreEvent.findFirstOrThrow({
-      where: { account_id: author.account_id, event_type: "module_dss_unclassified" },
+      where: { account_id: author.account_id, event_type: "module_dss_retained" },
     });
     expect(dssEv.moderator_account_id).toBe(mod.account_id);
     expect(dssEv.explanation).toBe("reviewed proactively, nothing wrong");
