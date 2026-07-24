@@ -244,20 +244,19 @@ export async function publishModule(moduleId: string, authorId: string, now: Dat
     throw new ModuleError("Only a module in pending review (or a published module being re-released) can be published.");
   }
 
-  const moduleText = await aggregateModuleText(moduleId);
+  // Check 1 — commission alignment: a STRUCTURAL NO-OP for now. Commission
+  // Marketplace isn't built — associated_commission_id is a nullable soft
+  // reference with no real structured commission fields behind it, so there is
+  // nothing genuinely structured to compare against. The check therefore
+  // trivially passes whether the reference is null or set. DEFERRED: when
+  // Commission Marketplace ships with real structured fields (subject, topic,
+  // declared scope), rebuild this to compare those fields DIRECTLY (ID/enum
+  // equality), not by parsing text. (Deliberately no text-content comparison.)
 
-  // Check 1 — commission alignment (only if a commission is attached).
-  if (module.associated_commission_id && module.commission_snapshot_text) {
-    if (!contentSatisfies(moduleText, module.commission_snapshot_text)) {
-      throw new PublicationGateError(
-        "commission_alignment",
-        "Module content does not align with the attached commission's description. Revise the content to address the commission before publishing.",
-      );
-    }
-  }
-
-  // Check 2 — seed alignment (only if the seed reference was changed).
+  // Check 2 — seed alignment (only if the seed reference was changed). Seed is
+  // real, populated, structured data today, so this check stays as built.
   if (module.seed_ref_changed) {
+    const moduleText = await aggregateModuleText(moduleId);
     const rev = await prisma.seedRevision.findUniqueOrThrow({
       where: { revision_id: module.primary_seed_revision_id },
     });

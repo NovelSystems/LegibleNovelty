@@ -74,23 +74,25 @@ describe("Module Editor — lifecycle, DSS lock, publication gate", () => {
     expect(republished.version).toBe(2);
   });
 
-  it("commission alignment blocks on mismatch and passes on match", async () => {
+  it("commission alignment is a structural no-op (Commission Marketplace not built) — passes whether the reference is null or set", async () => {
     const { seed } = await makePublishedPrimarySeed();
     const author = await makeAccount();
-    // Module content unrelated to the commission requirement keywords.
-    const module = await makeModuleWithText(author.account_id, seed.seed_id, "content about trains and railways");
-    await setCommission(module.module_id, author.account_id, "commission-123", "photosynthesis chloroplast");
-    await submitForReview(module.module_id, author.account_id);
 
-    await expect(publishModule(module.module_id, author.account_id)).rejects.toBeInstanceOf(
-      PublicationGateError,
-    );
+    // No commission attached → publishes.
+    const noCommission = await makeModuleWithText(author.account_id, seed.seed_id, "content about trains and railways");
+    await submitForReview(noCommission.module_id, author.account_id);
+    expect((await publishModule(noCommission.module_id, author.account_id)).status).toBe("published");
 
-    // Make the content satisfy the commission requirement → publishes.
-    const el = await prisma.moduleElement.findFirstOrThrow({ where: { page: { module_id: module.module_id } } });
-    await updateElementContent(el.element_id, { plainText: "photosynthesis and chloroplast explained here" });
-    const published = await publishModule(module.module_id, author.account_id);
+    // A commission soft-reference attached (with content that the OLD keyword
+    // check would have blocked) → still publishes: there's no real structured
+    // commission data to compare against yet, so the check is deferred.
+    const author2 = await makeAccount();
+    const withCommission = await makeModuleWithText(author2.account_id, seed.seed_id, "unrelated content about trains");
+    await setCommission(withCommission.module_id, author2.account_id, "commission-123", "photosynthesis chloroplast");
+    await submitForReview(withCommission.module_id, author2.account_id);
+    const published = await publishModule(withCommission.module_id, author2.account_id);
     expect(published.status).toBe("published");
+    expect(published.associated_commission_id).toBe("commission-123");
   });
 
   it("seed alignment fires only after a seed-reference change, blocking on mismatch", async () => {

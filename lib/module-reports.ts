@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import type { CitedClause } from "@prisma/client";
+import type { CitedClause, Prisma } from "@prisma/client";
 import { REPORT_DAILY_CAP, combinedReportsTodayCount, overReportCap } from "@/lib/report-quota";
 import { applyStandingScoreDeltaWithin } from "@/lib/standing-scores";
 
@@ -26,6 +26,37 @@ export class ModuleReportError extends Error {
     super(message);
     this.name = "ModuleReportError";
   }
+}
+
+// The single DSS-tier-application logic shared by BOTH the report-rejection path
+// and the manual-takedown path (Module Editor fix). Severity classification is
+// the moderator's OPTIONAL call on both paths: if none is given, no DSS effect
+// is applied at all. What drives DSS is the moderator's substantiated judgment
+// about the content, not which path surfaced it — so the two call the SAME
+// function, never two versions.
+async function applyAuthorDssTierWithin(
+  tx: Prisma.TransactionClient,
+  args: {
+    authorAccountId: string;
+    severity?: ModuleSeverity;
+    moderatorAccountId: string;
+    explanation: string;
+  },
+  now: Date,
+) {
+  if (!args.severity) return; // No classification → no DSS effect.
+  await applyStandingScoreDeltaWithin(
+    tx,
+    {
+      accountId: args.authorAccountId,
+      scoreType: "DSS",
+      delta: DSS_TIER[args.severity],
+      eventType: `module_dss_${args.severity}`,
+      moderatorAccountId: args.moderatorAccountId,
+      explanation: args.explanation,
+    },
+    now,
+  );
 }
 
 // --- filing + automatic takedown thresholds (Task 4) -------------------------
@@ -155,15 +186,12 @@ export async function moderatorReviewModule(
     }
 
     if (args.decision === "reject") {
-      // DSS tier on the author (0/-10/-20), same three-tier structure as seeds.
-      const severity = args.severity ?? "insufficiency";
-      await applyStandingScoreDeltaWithin(
+      // DSS tier on the author — the SAME shared logic as manual takedown.
+      await applyAuthorDssTierWithin(
         tx,
         {
-          accountId: module.author_account_id,
-          scoreType: "DSS",
-          delta: DSS_TIER[severity],
-          eventType: `module_report_dss_${severity}`,
+          authorAccountId: module.author_account_id,
+          severity: args.severity,
           moderatorAccountId: args.moderatorAccountId,
           explanation: args.rationale,
         },
@@ -191,24 +219,49 @@ export async function moderatorReviewModule(
 }
 
 // A Moderator's manual takedown authority — absolute and independent of the
-// automated state. Requires a brief rationale logged for accountability. Does
-// NOT apply Standing Score consequences (no report resolution).
+// automated state. Requires a brief rationale logged for accountability.
+//
+// DSS: applies the SAME severity-classified tier to the author as the
+// report-rejection path (via the shared applyAuthorDssTierWithin), because what
+// drives DSS is the moderator's substantiated judgment about the content, not
+// which path surfaced it. Severity stays OPTIONAL — with none given, no DSS
+// effect. The one correct difference from the report path: NO CSS is applied
+// here, since a manual takedown has no reporter.
 export async function moderatorManualTakedown(
   moduleId: string,
   moderatorAccountId: string,
   rationale: string,
+  opts: { severity?: ModuleSeverity; citedClause?: CitedClause; sectionReference?: string } = {},
 ) {
   if (!rationale.trim()) throw new ModuleReportError("A rationale is required for a manual takedown.");
+  const module = await prisma.contextualizedModule.findUniqueOrThrow({ where: { module_id: moduleId } });
+  const now = new Date();
+
   return prisma.$transaction(async (tx) => {
     const decision = await tx.moduleReviewDecision.create({
       data: {
         module_id: moduleId,
         moderator_account_id: moderatorAccountId,
         decision: "reject",
-        cited_clause: null, // Discretionary manual action; not a report resolution.
+        // Manual takedown may optionally carry the same structured citation the
+        // report path records; a clause is not forced (this is discretionary,
+        // absolute authority).
+        cited_clause: opts.citedClause ?? null,
+        section_reference: opts.sectionReference ?? null,
         rationale,
       },
     });
+    // Same DSS-tier logic as the report-rejection path (no CSS — no reporter).
+    await applyAuthorDssTierWithin(
+      tx,
+      {
+        authorAccountId: module.author_account_id,
+        severity: opts.severity,
+        moderatorAccountId,
+        explanation: rationale,
+      },
+      now,
+    );
     await tx.contextualizedModule.update({
       where: { module_id: moduleId },
       data: { status: "moderation_hold" },

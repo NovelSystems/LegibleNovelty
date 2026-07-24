@@ -4,6 +4,7 @@ import { publishModule, submitForReview } from "@/lib/modules";
 import {
   createModuleReviewAppeal,
   fileModuleReport,
+  moderatorManualTakedown,
   moderatorReviewModule,
   moduleRequiresEscalation,
   ModuleReportError,
@@ -115,7 +116,7 @@ describe("Module Editor — reports, takedown, governance", () => {
     expect(cssEv.moderator_account_id).toBe(mod.account_id);
     expect(cssEv.explanation).toContain("advocacy");
     const dssEv = await prisma.standingScoreEvent.findFirstOrThrow({
-      where: { account_id: author.account_id, event_type: "module_report_dss_inappropriate" },
+      where: { account_id: author.account_id, event_type: "module_dss_inappropriate" },
     });
     expect(dssEv.moderator_account_id).toBe(mod.account_id);
 
@@ -149,6 +150,38 @@ describe("Module Editor — reports, takedown, governance", () => {
         rationale: "no clause given",
       }),
     ).rejects.toBeInstanceOf(ModuleReportError);
+  });
+
+  it("applies the same author DSS tier on a severity-classified manual takedown (no CSS, no reporter)", async () => {
+    const { module, author } = await publishedModule();
+    const mod = await makeAccount();
+    const decision = await moderatorManualTakedown(module.module_id, mod.account_id, "clearly egregious content", {
+      severity: "egregious", // -20 DSS, same tiers as the report path
+      citedClause: "charter",
+      sectionReference: "page 1",
+    });
+    expect(decision.cited_clause).toBe("charter");
+    // Author took the -20 tier via the SAME shared logic (event_type is neutral).
+    expect(value(await getStandingScore(author.account_id, "DSS"))).toBe(30);
+    const dssEv = await prisma.standingScoreEvent.findFirstOrThrow({
+      where: { account_id: author.account_id, event_type: "module_dss_egregious" },
+    });
+    expect(dssEv.moderator_account_id).toBe(mod.account_id);
+    // Module is held. No CSS is applied on a manual takedown (there is no
+    // reporter) — the only score event tied to this module's author is the DSS.
+    const m = await prisma.contextualizedModule.findUniqueOrThrow({ where: { module_id: module.module_id } });
+    expect(m.status).toBe("moderation_hold");
+    const authorScoreEvents = await prisma.standingScoreEvent.findMany({
+      where: { account_id: author.account_id },
+    });
+    expect(authorScoreEvents.every((e) => e.score_type === "DSS")).toBe(true);
+  });
+
+  it("applies NO author DSS on a manual takedown with no severity classification", async () => {
+    const { module, author } = await publishedModule();
+    const mod = await makeAccount();
+    await moderatorManualTakedown(module.module_id, mod.account_id, "taking down pending review");
+    expect(value(await getStandingScore(author.account_id, "DSS"))).toBe(50); // untouched
   });
 
   it("shares the 3/day report cap across seeds and modules", async () => {
