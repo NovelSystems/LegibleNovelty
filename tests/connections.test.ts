@@ -16,6 +16,7 @@ import {
   ContactShareError,
 } from "@/lib/contact";
 import { createChildSubAccount } from "@/lib/lifecycle";
+import { createLessonPlan } from "@/lib/lesson-plans";
 import { dobForAge, makeAccount, uniqueEmail } from "./helpers/factory";
 
 describe("Connection & ParentApproval (Task 4) + Share Contact (Task 5)", () => {
@@ -48,8 +49,10 @@ describe("Connection & ParentApproval (Task 4) + Share Contact (Task 5)", () => 
       password: "path kid password",
     });
 
-    // one_time_pass → NO standing connection after approval.
-    const lessonPlanId = randomUUID(); // Stubbed soft reference.
+    // one_time_pass → NO standing connection after approval. The lesson_plan_id
+    // is now a REAL FK (closed by Lesson Planner), so point it at an actual plan.
+    const plan = await createLessonPlan({ creatorAccountId: adult.account_id, title: "OTP plan" });
+    const lessonPlanId = plan.lesson_plan_id;
     const otp = await requestOneTimePass({
       childAccountId: child.account_id,
       requestingAdultAccountId: adult.account_id,

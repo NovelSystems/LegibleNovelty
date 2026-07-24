@@ -51,8 +51,9 @@ is the authoritative source for product behaviour.
 
 ## Build status
 
-The project is built in stages. **Stages 0 and 1, plus the Workshop Seed Editor, are
-complete.** Everything below them is designed and specified, not yet implemented.
+The project is built in stages. **Stages 0 and 1, the cross-cutting Standing Scores system, and
+all three Workshop sub-stages (Seed Editor, Module Editor, Lesson Planner) are complete.**
+Everything below them is designed and specified, not yet implemented.
 
 - ✅ **Stage 0 — Infrastructure substrate.** A fully local, zero-cost
   Docker environment: PostgreSQL, the Node application container, and a Mailpit email catcher;
@@ -92,8 +93,20 @@ complete.** Everything below them is designed and specified, not yet implemented
   DSS authoring-lock and shared report cap; the content-governance review layer (structured
   clause citation, Taxonomy-based escalation tier, 3+-reviewer appeals); the age-based under-18
   endorsement visibility gate (reusing Stage 1's 18+ check); and the page/element/template
-  authoring model with nested fillable fields. Lesson Planner remains deferred; Endorsement/
-  Library consuming logic is Library's.
+  authoring model with nested fillable fields. Endorsement/Library consuming logic is Library's.
+- ✅ **Workshop — Lesson Planner _(third and final Workshop sub-stage)_.** The `LessonPlan`
+  "playlist" model — an ordered sequence of **live** `module_id` references (deliberately NOT
+  pinned to a version/`SeedRevision`, the opposite of Module's seed pin, so a plan always
+  reflects a module's current published state); the creator/assigner distinction as separately
+  tracked roles; per-instance `LessonPlanAssignment` records (learners + date range) that keep
+  the same plan across multiple cohorts from conflating data; `LessonPlanReport` closing the
+  free-text-title vandalism gap, reusing SeedReport's shape and the now-four-way combined daily
+  report cap (comments-ready, modules, seeds, lesson plans), with CSS on both sides (reporter
+  +5/-2, creator -5/-20); the per-learner/per-module tracking dashboard built against a stubbed
+  completion signal; and the completion-submission prompt trigger/routing keyed off the
+  assignment. Deliberately **un-gated**: no VE-status and no DSS authoring-lock on creation or
+  assignment. Closes Stage 1's open `ParentApproval.lesson_plan_id` soft reference with a real
+  FK. Real completion data and the prompt's gating remain Library's.
 - ⬜ **Later subsystems.** Library (browse/search/reading, endorsement, lesson plans),
   Workshop (seed & module authoring, commission marketplace, moderation), Certification Center
   (the LNC mini-LMS), Communication (comments, Big Questions, forum), Notification, and
