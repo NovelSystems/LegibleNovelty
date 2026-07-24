@@ -17,14 +17,25 @@ import {
 export const CSS_REPORT_UPHELD = 5;
 export const CSS_REPORT_UNFOUNDED = -2;
 
-// Creator CSS tiers — PROPOSED, NOT CONFIRMED (flagged in the summary). Lesson
-// plan creation is NOT DSS-tracked (Task 1), so the creator's consequence lands
-// on CSS, mirroring CSS's existing "own comment reported and removed" tiers
-// (-5 standard, -20 egregious) rather than DSS's 0/-10/-20 tiers. The moderator
-// classifies egregiousness; an ordinary correction is the standard tier.
-export const CSS_CREATOR_STANDARD = -5;
-export const CSS_CREATOR_EGREGIOUS = -20;
-export type LessonPlanSeverity = "standard" | "egregious";
+// Creator CSS tiers — lesson plan creation is NOT DSS-tracked (Task 1), so the
+// creator's consequence lands on CSS. REUSES the exact three-way severity
+// classification already established for DSS (insufficiency / inappropriate /
+// egregious), but with CSS-SCALED point values instead of DSS's 0/-10/-20:
+//
+//   insufficiency  0    good-faith, trivial issue a moderator just fixes — no
+//                       penalty, but still recorded (proportionality)
+//   inappropriate  -5   an ordinary correctable problem
+//   egregious      -20  malicious / severe
+//
+// Same enum and same "moderator's optional call" pattern used for module/seed
+// reports — one classification scheme, different point values for this
+// consequence type. PROPOSED values, flagged in the summary as not confirmed.
+export const CSS_CREATOR_TIER: Record<LessonPlanSeverity, number> = {
+  insufficiency: 0,
+  inappropriate: -5,
+  egregious: -20,
+};
+export type LessonPlanSeverity = "insufficiency" | "inappropriate" | "egregious";
 
 export class LessonPlanReportError extends Error {
   constructor(message: string) {
@@ -131,16 +142,21 @@ export async function resolveLessonPlanReportUpheld(
   );
 
   // Creator CSS consequence (NOT DSS — lesson plan creation isn't DSS-tracked).
+  // ALWAYS write a StandingScoreEvent — even at 0 delta when severity is
+  // insufficiency or unclassified — so every upheld resolution leaves a
+  // moderator-attributed accountability record (the same "0-delta is a valid
+  // outcome; no event is not" rule established in the Module Editor fix chain).
   const plan = await prisma.lessonPlan.findUniqueOrThrow({
     where: { lesson_plan_id: report.lesson_plan_id },
   });
-  const egregious = args.severity === "egregious";
   await recordStandingScoreDelta(
     {
       accountId: plan.creator_account_id,
       scoreType: "CSS",
-      delta: egregious ? CSS_CREATOR_EGREGIOUS : CSS_CREATOR_STANDARD,
-      eventType: egregious ? "lesson_plan_removed_egregious" : "lesson_plan_removed_standard",
+      delta: args.severity ? CSS_CREATOR_TIER[args.severity] : 0, // 0 when unclassified
+      eventType: args.severity
+        ? `lesson_plan_removed_${args.severity}`
+        : "lesson_plan_removed_unclassified",
       moderatorAccountId: args.moderatorAccountId,
       explanation: args.explanation,
     },

@@ -15,8 +15,7 @@ import {
   type CompletionSignal,
 } from "@/lib/lesson-plan-dashboard";
 import {
-  CSS_CREATOR_EGREGIOUS,
-  CSS_CREATOR_STANDARD,
+  CSS_CREATOR_TIER,
   fileLessonPlanReport,
   listPendingLessonPlanReports,
   LessonPlanReportError,
@@ -149,7 +148,7 @@ describe("Lesson Planner — creation, assignment, live refs, dashboard, reports
     expect(seq.map((s) => s.position)).toEqual([0, 1]);
   });
 
-  it("keeps multiple assignments of the same plan to different cohorts from conflating data", async () => {
+  it("keeps multiple assignments of the same plan to different cohorts (different learner sets + date ranges) from conflating data", async () => {
     const creator = await makeAccount();
     const assigner = await makeAccount();
     const { module } = await publishedModule("shared module");
@@ -158,32 +157,51 @@ describe("Lesson Planner — creation, assignment, live refs, dashboard, reports
       title: "Reused across cohorts",
       moduleIds: [module.module_id],
     });
-    const learner = await makeAccount(); // SAME learner in both cohorts
+    // Different learner SETS with a deliberate overlap: `shared` is in both
+    // cohorts, `onlyA`/`onlyB` in one each — the strongest non-conflation case.
+    const shared = await makeAccount();
+    const onlyA = await makeAccount();
+    const onlyB = await makeAccount();
 
     const cohortA = await assignLessonPlan({
       lessonPlanId: plan.lesson_plan_id,
       assignerAccountId: assigner.account_id,
-      learnerIds: [learner.account_id],
+      learnerIds: [shared.account_id, onlyA.account_id],
       dateRangeStart: new Date("2026-01-01"),
       dateRangeEnd: new Date("2026-02-01"),
     });
     const cohortB = await assignLessonPlan({
       lessonPlanId: plan.lesson_plan_id,
       assignerAccountId: assigner.account_id,
-      learnerIds: [learner.account_id],
+      learnerIds: [shared.account_id, onlyB.account_id],
       dateRangeStart: new Date("2026-06-01"),
       dateRangeEnd: new Date("2026-07-01"),
     });
 
-    // Stub: completed under cohort A only, not under cohort B — keyed by assignment.
+    // Stub: everything under cohort A is completed; nothing under cohort B is —
+    // keyed by (assignment, learner, module), so the SHARED learner's cell must
+    // read completed under A and not_started under B, never merged.
     const signal: CompletionSignal = ({ assignmentId }) =>
       assignmentId === cohortA.assignment_id ? "completed" : "not_started";
 
     const cells = await buildAssignerDashboard(assigner.account_id, {}, signal);
-    const a = cells.find((c) => c.assignmentId === cohortA.assignment_id)!;
-    const b = cells.find((c) => c.assignmentId === cohortB.assignment_id)!;
-    expect(a.status).toBe("completed");
-    expect(b.status).toBe("not_started"); // NOT conflated with cohort A
+
+    // The shared learner appears in BOTH assignments as independent cells.
+    const sharedA = cells.find(
+      (c) => c.assignmentId === cohortA.assignment_id && c.learnerId === shared.account_id,
+    )!;
+    const sharedB = cells.find(
+      (c) => c.assignmentId === cohortB.assignment_id && c.learnerId === shared.account_id,
+    )!;
+    expect(sharedA.status).toBe("completed");
+    expect(sharedB.status).toBe("not_started"); // NOT conflated across cohorts
+
+    // Cohort membership doesn't leak: onlyA never appears under B, onlyB never under A.
+    expect(cells.some((c) => c.assignmentId === cohortB.assignment_id && c.learnerId === onlyA.account_id)).toBe(false);
+    expect(cells.some((c) => c.assignmentId === cohortA.assignment_id && c.learnerId === onlyB.account_id)).toBe(false);
+    // Every cohort-A cell is completed; every cohort-B cell is not_started.
+    expect(cells.filter((c) => c.assignmentId === cohortA.assignment_id).every((c) => c.status === "completed")).toBe(true);
+    expect(cells.filter((c) => c.assignmentId === cohortB.assignment_id).every((c) => c.status === "not_started")).toBe(true);
   });
 
   it("filters the dashboard by date range, learner, and module against a stubbed signal", async () => {
@@ -276,7 +294,7 @@ describe("Lesson Planner — creation, assignment, live refs, dashboard, reports
     expect(none).toHaveLength(0);
   });
 
-  it("files a report that surfaces to Moderators, then upholds it: reporter +5 CSS, creator -5 CSS", async () => {
+  it("files a report that surfaces to Moderators, then upholds it (inappropriate): reporter +5, creator -5 CSS", async () => {
     const creator = await makeAccount();
     const reporter = await makeAccount();
     const mod = await makeAccount();
@@ -300,6 +318,7 @@ describe("Lesson Planner — creation, assignment, live refs, dashboard, reports
       explanation: "corrected the title and deactivated",
       correctedTitle: "Clean Title",
       deactivate: true,
+      severity: "inappropriate", // -5 CSS
     });
 
     // Corrective action applied.
@@ -307,13 +326,13 @@ describe("Lesson Planner — creation, assignment, live refs, dashboard, reports
     expect(fixed.title).toBe("Clean Title");
     expect(fixed.is_public).toBe(false);
 
-    // Reporter +5, creator -5 (standard tier), both on CSS. Neither on DSS.
+    // Reporter +5, creator -5 (inappropriate tier), both on CSS. Neither on DSS.
     expect(value(await getStandingScore(reporter.account_id, "CSS"))).toBe(55);
-    expect(value(await getStandingScore(creator.account_id, "CSS"))).toBe(50 + CSS_CREATOR_STANDARD);
+    expect(value(await getStandingScore(creator.account_id, "CSS"))).toBe(50 + CSS_CREATOR_TIER.inappropriate);
     expect(value(await getStandingScore(creator.account_id, "DSS"))).toBe(50); // untouched
 
     const creatorEv = await prisma.standingScoreEvent.findFirstOrThrow({
-      where: { account_id: creator.account_id, event_type: "lesson_plan_removed_standard" },
+      where: { account_id: creator.account_id, event_type: "lesson_plan_removed_inappropriate" },
     });
     expect(creatorEv.moderator_account_id).toBe(mod.account_id);
     expect(creatorEv.explanation).toContain("corrected");
@@ -337,7 +356,66 @@ describe("Lesson Planner — creation, assignment, live refs, dashboard, reports
       deactivate: true,
       severity: "egregious",
     });
-    expect(value(await getStandingScore(creator.account_id, "CSS"))).toBe(50 + CSS_CREATOR_EGREGIOUS);
+    expect(value(await getStandingScore(creator.account_id, "CSS"))).toBe(50 + CSS_CREATOR_TIER.egregious);
+  });
+
+  it("charges the creator NOTHING for an insufficiency (good-faith) correction, but STILL records the event", async () => {
+    const creator = await makeAccount();
+    const reporter = await makeAccount();
+    const mod = await makeAccount();
+    const plan = await createLessonPlan({ creatorAccountId: creator.account_id, title: "Awkwrd Ttle", isPublic: true });
+    const report = await fileLessonPlanReport({
+      lessonPlanId: plan.lesson_plan_id,
+      reporterAccountId: reporter.account_id,
+      reason: "typo in title",
+    });
+
+    await resolveLessonPlanReportUpheld({
+      reportId: report.report_id,
+      moderatorAccountId: mod.account_id,
+      explanation: "fixed a harmless typo, no fault",
+      correctedTitle: "Awkward Title",
+      severity: "insufficiency", // 0 CSS — good-faith, trivial
+    });
+
+    // Reporter still rewarded; creator's CSS untouched (0 delta).
+    expect(value(await getStandingScore(reporter.account_id, "CSS"))).toBe(55);
+    expect(value(await getStandingScore(creator.account_id, "CSS"))).toBe(50);
+    // ...but the 0-delta accountability record STILL exists.
+    const ev = await prisma.standingScoreEvent.findFirstOrThrow({
+      where: { account_id: creator.account_id, event_type: "lesson_plan_removed_insufficiency" },
+    });
+    expect(ev.moderator_account_id).toBe(mod.account_id);
+    expect(ev.explanation).toBe("fixed a harmless typo, no fault");
+    expect(Number(ev.point_delta)).toBe(0);
+  });
+
+  it("records a 0-delta creator event when an upheld report is resolved with NO severity classified", async () => {
+    const creator = await makeAccount();
+    const reporter = await makeAccount();
+    const mod = await makeAccount();
+    const plan = await createLessonPlan({ creatorAccountId: creator.account_id, title: "Meh Title", isPublic: true });
+    const report = await fileLessonPlanReport({
+      lessonPlanId: plan.lesson_plan_id,
+      reporterAccountId: reporter.account_id,
+      reason: "please fix",
+    });
+
+    // Upheld (title corrected) but the moderator classifies no severity at all.
+    await resolveLessonPlanReportUpheld({
+      reportId: report.report_id,
+      moderatorAccountId: mod.account_id,
+      explanation: "corrected without characterizing severity",
+      correctedTitle: "Better Title",
+    });
+
+    expect(value(await getStandingScore(creator.account_id, "CSS"))).toBe(50); // 0 delta
+    const ev = await prisma.standingScoreEvent.findFirstOrThrow({
+      where: { account_id: creator.account_id, event_type: "lesson_plan_removed_unclassified" },
+    });
+    expect(ev.moderator_account_id).toBe(mod.account_id);
+    expect(ev.explanation).toBe("corrected without characterizing severity");
+    expect(Number(ev.point_delta)).toBe(0);
   });
 
   it("resolves an unfounded report: reporter -2 CSS, creator untouched, plan retained", async () => {
