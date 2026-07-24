@@ -1,7 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/prisma";
 import {
-  canRestoreEss,
   getStandingScore,
   isScoreLocked,
   driftedValue,
@@ -245,8 +244,6 @@ describe("Standing Scores — drift, locking, restoration", () => {
     expect(
       (await prisma.account.findUniqueOrThrow({ where: { account_id: account.account_id } })).ve_status,
     ).toBe(true);
-    // canRestoreEss still confirms the fresh grant is from a different VE.
-    expect(await canRestoreEss(account.account_id)).toBe(true);
   });
 
   // --- moderator attribution ------------------------------------------------

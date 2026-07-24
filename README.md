@@ -83,6 +83,17 @@ complete.** Everything below them is designed and specified, not yet implemented
   directly); DSS lock is retrofitted into the Seed Editor authoring/publish path; a new
   `SeedReport` path closes the free-text vandalism gap, resolving through the existing
   SeedRevision moderator-edit system. Module Editor / Library triggers remain unwired.
+- ✅ **Workshop — Module Editor _(second of three Workshop sub-stages)_.** Contextualized Module
+  schema (primary seed pinned to an exact `SeedRevision`, secondary seeds pinned the same way);
+  the lifecycle state machine (Draft → Pending Review → [Moderation Hold] → Published, version on
+  publish); the two deterministic publication-gate checks (commission + seed alignment);
+  report-driven takedown (1→hold, 2→auto-takedown, disarm-on-clear, re-arm on new version) wired
+  into Standing Scores (CSS to reporter, DSS tier to author, one transaction) reusing the exact
+  DSS authoring-lock and shared report cap; the content-governance review layer (structured
+  clause citation, Taxonomy-based escalation tier, 3+-reviewer appeals); the age-based under-18
+  endorsement visibility gate (reusing Stage 1's 18+ check); and the page/element/template
+  authoring model with nested fillable fields. Lesson Planner remains deferred; Endorsement/
+  Library consuming logic is Library's.
 - ⬜ **Later subsystems.** Library (browse/search/reading, endorsement, lesson plans),
   Workshop (seed & module authoring, commission marketplace, moderation), Certification Center
   (the LNC mini-LMS), Communication (comments, Big Questions, forum), Notification, and

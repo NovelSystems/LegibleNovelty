@@ -222,6 +222,11 @@ model Account {
   moderated_score_events StandingScoreEvent[] @relation("EventModerator")
   seed_reports_filed     SeedReport[]         @relation("ReportReporter")
   seed_reports_resolved  SeedReport[]         @relation("ReportResolver")
+  // Module Editor.
+  modules_authored        ContextualizedModule[]
+  module_reports_filed    ModuleReport[]         @relation("ModuleReportReporter")
+  module_reports_resolved ModuleReport[]         @relation("ModuleReportResolver")
+  module_review_decisions ModuleReviewDecision[] @relation("ModuleDecisionModerator")
 
   // email_hash and display_name_hash are the two indexed lookup columns the
   // brief requires (reclaim / reuse-blocking hit them on every signup).
@@ -500,6 +505,13 @@ model Taxonomy {
   version      Int      @default(1)
   deprecated_at DateTime?
 
+  // Admin-set flag marking a government-or-political-systems Topic. Module Editor
+  // reuses THIS existing Taxonomy node (rather than a separate module-level tag)
+  // to route escalation-tier review (Module Editor Task 5). Flagged in the
+  // delivery summary as an inference — if a standalone tag was intended instead,
+  // this is the piece to change.
+  is_political_systems Boolean @default(false)
+
   // Subjects/Topics are admin-maintained; a VE may PROPOSE a Topic and a
   // System_Admin approves. The proposal→approval routing is undecided (Open
   // Items) — these columns support it without deciding the workflow.
@@ -569,6 +581,7 @@ model LearningSeed {
   comments     SeedDraftComment[]
   revisions    SeedRevision[]
   reports      SeedReport[]
+  modules      ContextualizedModule[] // Modules whose primary seed is this seed.
   chain_edges_out SeedChain[] @relation("ChainFrom")
   chain_edges_in  SeedChain[] @relation("ChainTo")
 
@@ -685,6 +698,10 @@ model SeedRevision {
 
   created_at DateTime @default(now())
 
+  // Modules pinned to this exact archived revision (Module Editor Task 1).
+  modules_primary       ContextualizedModule[] @relation("ModulePrimaryRevision")
+  module_secondary_seeds ModuleSecondarySeed[]
+
   @@unique([seed_id, revision_number])
   @@index([seed_id])
   @@index([editor_account_id])
@@ -770,6 +787,248 @@ model SeedReport {
   resolver            Account?         @relation("ReportResolver", fields: [resolved_by], references: [account_id])
 
   @@index([seed_id])
+  @@index([reporter_account_id])
+  @@index([status])
+}
+
+// ===========================================================================
+// Workshop — Module Editor (second sub-stage). A Contextualized Module wraps a
+// primary Learning Seed in domain-flavored teaching content across a sequence of
+// positioned-element pages, with lifecycle/versioning, a deterministic
+// publication gate, report-driven takedown wired into Standing Scores, and a
+// content-governance review layer.
+// ===========================================================================
+
+enum ModuleStatus {
+  draft
+  pending_review
+  moderation_hold
+  published
+}
+
+enum AiAttestation {
+  wholly_human
+  ai_assisted_manual_flair
+  ai_pipeline
+}
+
+enum ModuleElementType {
+  text
+  image
+  fillable_field // Reserved; fillable fields normally nest inside text content.
+}
+
+enum ModuleDecisionType {
+  retain
+  reject
+}
+
+// Structured citation for a rejection (not free text) — the clause a Moderator
+// applies (Content Governance Policy Sections 3/5/6).
+enum CitedClause {
+  charter
+  functional_test
+  comparison_rule
+}
+
+enum ModuleReviewAppealStatus {
+  pending
+  resolved
+}
+
+enum ModuleReportStatus {
+  pending
+  resolved
+}
+
+model ContextualizedModule {
+  module_id         String @id @default(uuid())
+  author_account_id String
+  author            Account @relation(fields: [author_account_id], references: [account_id])
+
+  // Exactly one mandatory primary seed — what educator endorsement vouches for.
+  primary_seed_id   String
+  primary_seed      LearningSeed @relation(fields: [primary_seed_id], references: [seed_id])
+  // Pinned at creation, permanent: the exact archived SeedRevision the module was
+  // built against (a real FK, not a bare version string). Editing the seed later
+  // creates a new revision but never retroactively changes this citation.
+  primary_seed_revision_id String
+  primary_seed_revision    SeedRevision @relation("ModulePrimaryRevision", fields: [primary_seed_revision_id], references: [revision_id])
+
+  // Secondary seeds (max 3, app-enforced) are modeled as a join table so each
+  // reference can PIN to a SeedRevision the same way the primary does (INFERRED
+  // requirement — flagged in the summary). Locked at submission to Pending Review.
+  secondary_seeds ModuleSecondarySeed[]
+
+  // prerequisite_followon_refs and lesson_size_scope are DERIVED from the primary
+  // seed's chain relationships / the pinned revision (see lib/modules.ts), not
+  // stored columns.
+
+  version          Int  @default(0) // Increments on publish, not on autosave.
+  publication_date DateTime?
+
+  // Author-declared at submission; locks permanently if ai_pipeline (Task 2).
+  ai_attestation AiAttestation?
+
+  // Commission Marketplace isn't built — soft reference (no FK). The snapshot
+  // text freezes at first association/publication and never updates after.
+  associated_commission_id String?
+  commission_snapshot_text String?
+
+  // INERT placeholder columns (Task 1) — nothing in this sub-stage reads or
+  // writes them.
+  prepublication_review_report String? // Section 8 DEF/Justice report (Phase 2).
+  flair_tags                   String[] @default([]) // Groundwork only, no UI.
+
+  status ModuleStatus @default(draft)
+
+  // Version whose automatic-takedown trigger a moderator has cleared (disarmed).
+  // Reports on a disarmed version route to the queue only. Publishing a new
+  // version increments `version`, so it no longer matches → re-armed (Task 4).
+  takedown_disarmed_version Int?
+  // Set when 2 distinct reporters trigger automatic takedown pending review.
+  auto_taken_down           Boolean @default(false)
+
+  // True once the seed reference changed on an existing module; makes the next
+  // publish run the seed-alignment check (Task 3), then clears.
+  seed_ref_changed Boolean @default(false)
+
+  // Edit timestamp for Library's "edited under you" warning (Task 2); the
+  // warning trigger and line-count delta consumption are Library's.
+  last_edited_at DateTime?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  pages            ModulePage[]
+  reports          ModuleReport[]
+  review_decisions ModuleReviewDecision[]
+  appeals          ModuleReviewAppeal[]
+
+  @@index([author_account_id])
+  @@index([primary_seed_id])
+  @@index([status])
+}
+
+// Join table pinning each secondary seed citation to a specific SeedRevision.
+model ModuleSecondarySeed {
+  id                String @id @default(uuid())
+  module_id         String
+  module            ContextualizedModule @relation(fields: [module_id], references: [module_id], onDelete: Cascade)
+  seed_revision_id  String
+  seed_revision     SeedRevision @relation(fields: [seed_revision_id], references: [revision_id])
+
+  @@unique([module_id, seed_revision_id])
+  @@index([module_id])
+}
+
+// --- Authoring model (Task 7) ------------------------------------------------
+
+model ModuleTemplate {
+  template_id    String @id @default(uuid())
+  name           String
+  description    String?
+  // Pre-arranged element positions/types/placeholder content, instantiated into
+  // real ModuleElement rows when picked. Admin-authored only for now (flagged).
+  element_layout Json
+
+  pages ModulePage[]
+}
+
+model ModulePage {
+  page_id     String @id @default(uuid())
+  module_id   String
+  module      ContextualizedModule @relation(fields: [module_id], references: [module_id], onDelete: Cascade)
+  page_order  Int
+  // Informational: which template this page started from (if any). Does NOT
+  // constrain later edits — a template is a prefill, not a locked mode.
+  template_id String?
+  template    ModuleTemplate? @relation(fields: [template_id], references: [template_id])
+
+  elements ModuleElement[]
+
+  @@index([module_id])
+}
+
+model ModuleElement {
+  element_id   String            @id @default(uuid())
+  page_id      String
+  page         ModulePage        @relation(fields: [page_id], references: [page_id], onDelete: Cascade)
+  element_type ModuleElementType
+  position_x   Float
+  position_y   Float
+  width        Float
+  height       Float
+  z_index      Int
+  // Shape depends on element_type (type-discriminator + flexible content, same
+  // pattern as AccountFlag.flag_type / AwardInstance.target_id). A `text`
+  // element's content is TipTap rich content; fillable fields nest inside it as
+  // custom nodes with a unique id (@tiptap/extension-unique-id).
+  content      Json
+
+  @@index([page_id])
+}
+
+// --- Content-governance review (Task 5) --------------------------------------
+
+model ModuleReviewDecision {
+  decision_id          String             @id @default(uuid())
+  module_id            String
+  module               ContextualizedModule @relation(fields: [module_id], references: [module_id])
+  moderator_account_id String
+  moderator            Account            @relation("ModuleDecisionModerator", fields: [moderator_account_id], references: [account_id])
+  decision             ModuleDecisionType
+  // Structured citation required on a rejection (nullable when retained).
+  cited_clause         CitedClause?
+  section_reference    String? // The specific module section identified.
+  rationale            String
+  created_at           DateTime @default(now())
+
+  appeals ModuleReviewAppeal[]
+
+  @@index([module_id])
+}
+
+model ModuleReviewAppeal {
+  appeal_id           String                   @id @default(uuid())
+  module_id           String
+  module              ContextualizedModule     @relation(fields: [module_id], references: [module_id])
+  original_decision_id String
+  original_decision   ModuleReviewDecision     @relation(fields: [original_decision_id], references: [decision_id])
+  status              ModuleReviewAppealStatus @default(pending)
+  // Panel of 3+ distinct reviewers (app-enforced), spanning varied backgrounds,
+  // not limited to credentialed VEs. Stored as a plain UUID array (soft
+  // references) — the per-element FK a relation would need isn't expressible on
+  // an array; distinctness/count is enforced in lib/module-reports.ts.
+  panel_reviewer_ids  String[]
+  panel_rationale     String?
+  resolved_at         DateTime?
+
+  @@index([module_id])
+}
+
+// --- Report-driven takedown (Task 4) — mirrors SeedReport exactly ------------
+
+model ModuleReport {
+  report_id           String             @id @default(uuid())
+  module_id           String
+  module              ContextualizedModule @relation(fields: [module_id], references: [module_id])
+  reporter_account_id String
+  reporter            Account            @relation("ModuleReportReporter", fields: [reporter_account_id], references: [account_id])
+  reason              String
+  // The module version this report was filed against — the takedown trigger and
+  // its disarm state are per-version (Task 4).
+  module_version      Int
+  // True if filed against a version a moderator already cleared ("previously
+  // reviewed") — such reports route to the queue only, never auto-takedown.
+  previously_reviewed Boolean            @default(false)
+  status              ModuleReportStatus @default(pending)
+  created_at          DateTime           @default(now())
+  resolved_at         DateTime?
+  resolved_by         String?
+  resolver            Account?           @relation("ModuleReportResolver", fields: [resolved_by], references: [account_id])
+
+  @@index([module_id])
   @@index([reporter_account_id])
   @@index([status])
 }

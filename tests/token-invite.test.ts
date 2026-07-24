@@ -9,7 +9,7 @@ import {
 } from "@/lib/verification";
 import { lockStandingScoreDirectly } from "@/lib/standing-scores";
 import { prisma as db } from "@/lib/prisma";
-import { makeAccount, uniqueEmail, dobForAge } from "./helpers/factory";
+import { makeAccount, uniqueEmail, uniqueName, dobForAge } from "./helpers/factory";
 
 // VE token grant to an email that has no account yet — invite-link flow with a
 // lazy 28-day expiry. The existing-account path stays instant and unchanged.
@@ -54,7 +54,7 @@ describe("VE peer-token grant-to-email + 28-day expiry", () => {
       email: inviteEmail,
       password: "claimer password",
       dateOfBirth: dobForAge(30),
-      legalName: "Claimer",
+      legalName: uniqueName("Claimer"),
     });
     expect(claim.account.ve_status).toBe(true);
     expect(claim.account.ve_granted_by_account_id).toBe(granter.account_id);
@@ -92,7 +92,7 @@ describe("VE peer-token grant-to-email + 28-day expiry", () => {
         email: inviteEmail,
         password: "too late now",
         dateOfBirth: dobForAge(25),
-        legalName: "Latecomer",
+        legalName: uniqueName("Latecomer"),
       }),
     ).rejects.toBeInstanceOf(VerificationError);
   });
