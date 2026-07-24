@@ -186,18 +186,25 @@ export async function moderatorReviewModule(
       );
     }
 
+    // EVERY retain/reject decision leaves a moderator-attributed record on the
+    // author's DSS history via the SAME shared helper the manual-takedown path
+    // uses — reject applies the severity tier, retain applies a 0 delta (no
+    // infraction). This is independent of whether any reporter existed: a
+    // discretionary retain (zero pending reports) still records the decision.
+    // The per-reporter CSS events above are ADDITIVE, not a substitute.
+    await applyAuthorDssTierWithin(
+      tx,
+      {
+        authorAccountId: module.author_account_id,
+        // Only a rejection carries a severity tier; a retain is always 0-delta.
+        severity: args.decision === "reject" ? args.severity : undefined,
+        moderatorAccountId: args.moderatorAccountId,
+        explanation: args.rationale,
+      },
+      now,
+    );
+
     if (args.decision === "reject") {
-      // DSS tier on the author — the SAME shared logic as manual takedown.
-      await applyAuthorDssTierWithin(
-        tx,
-        {
-          authorAccountId: module.author_account_id,
-          severity: args.severity,
-          moderatorAccountId: args.moderatorAccountId,
-          explanation: args.rationale,
-        },
-        now,
-      );
       // Rejected → taken down (removed from public, in moderation hold).
       await tx.contextualizedModule.update({
         where: { module_id: args.moduleId },

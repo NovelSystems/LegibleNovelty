@@ -125,8 +125,8 @@ describe("Module Editor — reports, takedown, governance", () => {
     expect(m.status).toBe("moderation_hold");
   });
 
-  it("a retain decision applies CSS -5 to the reporter and requires no clause", async () => {
-    const { module } = await publishedModule();
+  it("a report-driven retain applies CSS -5 to the reporter AND a 0-delta author DSS record", async () => {
+    const { module, author } = await publishedModule();
     const reporter = await makeAccount();
     const mod = await makeAccount();
     await fileModuleReport({ moduleId: module.module_id, reporterAccountId: reporter.account_id, reason: "meh" });
@@ -136,7 +136,46 @@ describe("Module Editor — reports, takedown, governance", () => {
       decision: "retain",
       rationale: "content is within charter",
     });
+
+    // The per-reporter CSS event is unchanged (reporter penalized -5).
     expect(value(await getStandingScore(reporter.account_id, "CSS"))).toBe(45); // 50 - 5
+    const cssEv = await prisma.standingScoreEvent.findFirstOrThrow({
+      where: { account_id: reporter.account_id, event_type: "module_report_retained" },
+    });
+    expect(cssEv.moderator_account_id).toBe(mod.account_id);
+
+    // ADDITIVE: the retain decision ALSO leaves a 0-delta record on the author's
+    // DSS history — both events exist, not one or the other.
+    expect(value(await getStandingScore(author.account_id, "DSS"))).toBe(50); // untouched
+    const dssEv = await prisma.standingScoreEvent.findFirstOrThrow({
+      where: { account_id: author.account_id, event_type: "module_dss_unclassified" },
+    });
+    expect(dssEv.moderator_account_id).toBe(mod.account_id);
+    expect(dssEv.explanation).toBe("content is within charter");
+    expect(Number(dssEv.point_delta)).toBe(0);
+  });
+
+  it("a discretionary retain (zero pending reports) still records a 0-delta author DSS event", async () => {
+    const { module, author } = await publishedModule();
+    const mod = await makeAccount();
+
+    // No reports filed — the moderator reviews on their own initiative and
+    // retains. There is no reporter to credit, but the decision itself must
+    // still leave a moderator-attributed accountability record.
+    await moderatorReviewModule({
+      moduleId: module.module_id,
+      moderatorAccountId: mod.account_id,
+      decision: "retain",
+      rationale: "reviewed proactively, nothing wrong",
+    });
+
+    expect(value(await getStandingScore(author.account_id, "DSS"))).toBe(50); // 0 delta
+    const dssEv = await prisma.standingScoreEvent.findFirstOrThrow({
+      where: { account_id: author.account_id, event_type: "module_dss_unclassified" },
+    });
+    expect(dssEv.moderator_account_id).toBe(mod.account_id);
+    expect(dssEv.explanation).toBe("reviewed proactively, nothing wrong");
+    expect(Number(dssEv.point_delta)).toBe(0);
   });
 
   it("rejects a decision that cites no clause on a rejection", async () => {
