@@ -127,37 +127,37 @@ model Account {
   // purge split deletes date of birth — the two requirements are reconciled by
   // making the column nullable and enforcing presence on create. Flagged in the
   // delivery summary as a Task 1 vs. Task 3.5 tension resolved this way.
-  date_of_birth   DateTime?
-  is_child_subaccount Boolean @default(false)
-  parent_account_id   String?  // Set only for child sub-accounts.
-  parent  Account?  @relation("ParentChild", fields: [parent_account_id], references: [account_id])
-  children Account[] @relation("ParentChild")
+  date_of_birth       DateTime?
+  is_child_subaccount Boolean   @default(false)
+  parent_account_id   String? // Set only for child sub-accounts.
+  parent              Account?  @relation("ParentChild", fields: [parent_account_id], references: [account_id])
+  children            Account[] @relation("ParentChild")
 
   // Stored base grade + the date it was last set. Effective grade is computed
   // lazily at read time by counting mid-August rollovers since the anchor (see
   // lib/grade.ts and Open Items — scheduling mechanism deliberately NOT a job).
-  grade       Int?
+  grade             Int?
   grade_anchor_date DateTime?
 
   country String? // Child public identity: "A [grade] learner from [Country]".
 
-  preferred_display_name    String?
-  legal_name                String
+  preferred_display_name     String?
+  legal_name                 String
   display_name_use_preferred Boolean @default(false)
   // Blocks reuse of any purged handle platform-wide — checked on EVERY display
   // name assignment (signup, rename, reclaim), not only reclaim.
-  display_name_hash String? @map("display_name_hash")
+  display_name_hash          String? @map("display_name_hash")
 
   // Generated at purge time (not creation); opaque, not derivable from id/email.
   purged_pseudonymous_identifier String?
 
   // Plaintext email of an active account (nulled at purge). See header note.
-  email          String?  @unique
+  email          String?   @unique
   email_verified DateTime? // Auth-adapter compatible verification timestamp.
   // Permanent, irreversible; reclaim-flow lookup. Indexed from day one.
-  email_hash    String?
+  email_hash     String?
   // Retained post-purge (reclaim-flow use only; not a usable credential alone).
-  password_hash String?
+  password_hash  String?
 
   account_status AccountStatus @default(active)
   deactivated_at DateTime?
@@ -173,15 +173,15 @@ model Account {
   notification_opt_outs String[] @default([])
 
   // VE state (brief Task 6/7).
-  ve_status               Boolean @default(false)
+  ve_status                Boolean   @default(false)
   ve_granted_by_account_id String? // Convenience pointer; TokenGrant is the SoR.
-  ve_granted_by  Account?  @relation("VeGrantedBy", fields: [ve_granted_by_account_id], references: [account_id])
-  ve_granted     Account[] @relation("VeGrantedBy")
-  ve_token_available Boolean @default(false) // Every VE holds exactly 1 at a time.
+  ve_granted_by            Account?  @relation("VeGrantedBy", fields: [ve_granted_by_account_id], references: [account_id])
+  ve_granted               Account[] @relation("VeGrantedBy")
+  ve_token_available       Boolean   @default(false) // Every VE holds exactly 1 at a time.
 
   // Columns only populated by later stages (kept real now per brief Task 1).
-  lnc_status                   Boolean @default(false) // Certification Center (later).
-  fotl_status                  Boolean @default(false) // Payments & Billing (later).
+  lnc_status                    Boolean @default(false) // Certification Center (later).
+  fotl_status                   Boolean @default(false) // Payments & Billing (later).
   veframework_onboarding_passed Boolean @default(false) // Placeholder gate; mechanism out of scope.
 
   // Cached "has this architect ever had a seed endorsed" flag, read on the
@@ -194,39 +194,44 @@ model Account {
   updated_at DateTime @updatedAt
 
   // Relations (back-references).
-  sessions       Session[]
-  tokens         AccountToken[]
-  connections_a  Connection[]  @relation("ConnectionA")
-  connections_b  Connection[]  @relation("ConnectionB")
-  parent_approvals_as_child  ParentApproval[] @relation("ApprovalChild")
-  parent_approvals_as_adult  ParentApproval[] @relation("ApprovalAdult")
-  verification_applications  VerificationApplication[] @relation("ApplicationApplicant")
-  reviewed_applications      VerificationApplication[] @relation("ApplicationReviewer")
-  tokens_granted   TokenGrant[] @relation("GrantGranter")
-  tokens_received  TokenGrant[] @relation("GrantRecipient")
-  flags            AccountFlag[] @relation("FlagAccount")
-  flags_reviewed   AccountFlag[] @relation("FlagReviewer")
-  flags_secondary_reviewed AccountFlag[] @relation("FlagSecondaryReviewer")
-  token_request_threads TokenRequestThread[]
-  award_nominations AwardNomination[]
-  awards_won        AwardInstance[]
+  sessions                     Session[]
+  tokens                       AccountToken[]
+  connections_a                Connection[]              @relation("ConnectionA")
+  connections_b                Connection[]              @relation("ConnectionB")
+  parent_approvals_as_child    ParentApproval[]          @relation("ApprovalChild")
+  parent_approvals_as_adult    ParentApproval[]          @relation("ApprovalAdult")
+  verification_applications    VerificationApplication[] @relation("ApplicationApplicant")
+  reviewed_applications        VerificationApplication[] @relation("ApplicationReviewer")
+  tokens_granted               TokenGrant[]              @relation("GrantGranter")
+  tokens_received              TokenGrant[]              @relation("GrantRecipient")
+  flags                        AccountFlag[]             @relation("FlagAccount")
+  flags_reviewed               AccountFlag[]             @relation("FlagReviewer")
+  flags_secondary_reviewed     AccountFlag[]             @relation("FlagSecondaryReviewer")
+  token_request_threads        TokenRequestThread[]
+  award_nominations            AwardNomination[]
+  awards_won                   AwardInstance[]
   // Workshop / Seed Editor.
-  learning_seeds       LearningSeed[]
-  seed_draft_invites   SeedDraftInvite[]
-  seed_draft_comments  SeedDraftComment[]
-  seed_revisions       SeedRevision[]    @relation("RevisionEditor")
-  proposed_topics      Taxonomy[] @relation("TaxonomyProposer")
+  learning_seeds               LearningSeed[]
+  seed_draft_invites           SeedDraftInvite[]
+  seed_draft_comments          SeedDraftComment[]
+  seed_revisions               SeedRevision[]            @relation("RevisionEditor")
+  proposed_topics              Taxonomy[]                @relation("TaxonomyProposer")
   // Standing Scores (cross-cutting governance).
-  standing_scores        StandingScore[]
-  standing_score_events  StandingScoreEvent[] @relation("EventAccount")
-  moderated_score_events StandingScoreEvent[] @relation("EventModerator")
-  seed_reports_filed     SeedReport[]         @relation("ReportReporter")
-  seed_reports_resolved  SeedReport[]         @relation("ReportResolver")
+  standing_scores              StandingScore[]
+  standing_score_events        StandingScoreEvent[]      @relation("EventAccount")
+  moderated_score_events       StandingScoreEvent[]      @relation("EventModerator")
+  seed_reports_filed           SeedReport[]              @relation("ReportReporter")
+  seed_reports_resolved        SeedReport[]              @relation("ReportResolver")
   // Module Editor.
-  modules_authored        ContextualizedModule[]
-  module_reports_filed    ModuleReport[]         @relation("ModuleReportReporter")
-  module_reports_resolved ModuleReport[]         @relation("ModuleReportResolver")
-  module_review_decisions ModuleReviewDecision[] @relation("ModuleDecisionModerator")
+  modules_authored             ContextualizedModule[]
+  module_reports_filed         ModuleReport[]            @relation("ModuleReportReporter")
+  module_reports_resolved      ModuleReport[]            @relation("ModuleReportResolver")
+  module_review_decisions      ModuleReviewDecision[]    @relation("ModuleDecisionModerator")
+  // Lesson Planner.
+  lesson_plans_created         LessonPlan[]              @relation("LessonPlanCreator")
+  lesson_plan_assignments      LessonPlanAssignment[]    @relation("LessonPlanAssigner")
+  lesson_plan_reports_filed    LessonPlanReport[]        @relation("LessonPlanReportReporter")
+  lesson_plan_reports_resolved LessonPlanReport[]        @relation("LessonPlanReportResolver")
 
   // email_hash and display_name_hash are the two indexed lookup columns the
   // brief requires (reclaim / reuse-blocking hit them on every signup).
@@ -249,17 +254,17 @@ model Session {
 
 // Single-use tokens for email verification, password reset, and reclaim proof.
 model AccountToken {
-  id         String           @id @default(uuid())
-  token      String           @unique
-  type       AccountTokenType
-  account_id String
-  account    Account          @relation(fields: [account_id], references: [account_id], onDelete: Cascade)
+  id           String           @id @default(uuid())
+  token        String           @unique
+  type         AccountTokenType
+  account_id   String
+  account      Account          @relation(fields: [account_id], references: [account_id], onDelete: Cascade)
   // For reclaim: the address the person is proving control of (may differ from
   // the purged account's original address, which is no longer stored plaintext).
   target_email String?
-  expires    DateTime
-  consumed_at DateTime?
-  created_at DateTime @default(now())
+  expires      DateTime
+  consumed_at  DateTime?
+  created_at   DateTime         @default(now())
 
   @@index([account_id])
 }
@@ -309,21 +314,24 @@ model Connection {
 }
 
 model ParentApproval {
-  approval_id                String         @id @default(uuid())
-  child_account_id           String
-  child_account              Account        @relation("ApprovalChild", fields: [child_account_id], references: [account_id])
+  approval_id                 String         @id @default(uuid())
+  child_account_id            String
+  child_account               Account        @relation("ApprovalChild", fields: [child_account_id], references: [account_id])
   requesting_adult_account_id String
-  requesting_adult           Account        @relation("ApprovalAdult", fields: [requesting_adult_account_id], references: [account_id])
-  approval_type              ApprovalType
-  // Soft reference: LessonPlan doesn't exist yet (Workshop subsystem). Plain
-  // UUID now; a real FK constraint is added by a later migration once Workshop
-  // ships LessonPlan. Set only for one_time_pass.
-  lesson_plan_id             String?
-  status                     ApprovalStatus @default(pending)
-  created_at                 DateTime       @default(now())
+  requesting_adult            Account        @relation("ApprovalAdult", fields: [requesting_adult_account_id], references: [account_id])
+  approval_type               ApprovalType
+  // Closed loop from Stage 1: this was an unenforced UUID because LessonPlan
+  // didn't exist yet. Now that Lesson Planner ships LessonPlan, it carries a real
+  // FK constraint (Lesson Planner schema deliverable). Still optional — set only
+  // for one_time_pass — and nullable so existing rows without a plan are intact.
+  lesson_plan_id              String?
+  lesson_plan                 LessonPlan?    @relation(fields: [lesson_plan_id], references: [lesson_plan_id])
+  status                      ApprovalStatus @default(pending)
+  created_at                  DateTime       @default(now())
 
   @@index([child_account_id])
   @@index([requesting_adult_account_id])
+  @@index([lesson_plan_id])
 }
 
 // ---------------------------------------------------------------------------
@@ -331,30 +339,30 @@ model ParentApproval {
 // ---------------------------------------------------------------------------
 
 model VerificationApplication {
-  application_id       String              @id @default(uuid())
-  applicant_account_id String
-  applicant            Account             @relation("ApplicationApplicant", fields: [applicant_account_id], references: [account_id])
-  path                 VerificationPath
-  status               VerificationStatus  @default(pending)
-  reviewer_account_id  String?
-  reviewer             Account?            @relation("ApplicationReviewer", fields: [reviewer_account_id], references: [account_id])
+  application_id               String               @id @default(uuid())
+  applicant_account_id         String
+  applicant                    Account              @relation("ApplicationApplicant", fields: [applicant_account_id], references: [account_id])
+  path                         VerificationPath
+  status                       VerificationStatus   @default(pending)
+  reviewer_account_id          String?
+  reviewer                     Account?             @relation("ApplicationReviewer", fields: [reviewer_account_id], references: [account_id])
   // Rejection reason is a structured code plus optional free-text elaboration
   // (not a bare string) — captured on every rejection, every path.
   rejection_reason_code        RejectionReasonCode?
   rejection_reason_elaboration String?
   submitted_document_ref       String? // license_holder path only.
   directory_lookup_confirmed   Boolean? // Set by the human reviewer.
-  created_at DateTime  @default(now())
-  decided_at DateTime?
+  created_at                   DateTime             @default(now())
+  decided_at                   DateTime?
 
   @@index([applicant_account_id])
   @@index([status])
 }
 
 model TokenGrant {
-  grant_id            String    @id @default(uuid())
-  granting_account_id String
-  granting_account    Account   @relation("GrantGranter", fields: [granting_account_id], references: [account_id])
+  grant_id             String    @id @default(uuid())
+  granting_account_id  String
+  granting_account     Account   @relation("GrantGranter", fields: [granting_account_id], references: [account_id])
   // Nullable: for a grant to an email with NO existing account yet, the
   // recipient account isn't known until the invite link is used to create one.
   recipient_account_id String?
@@ -364,8 +372,8 @@ model TokenGrant {
   // Set when the recipient completes account creation via the invite link (VE
   // status is conferred at that moment). Null + no account + >28d = expired.
   claimed_at           DateTime?
-  granted_at   DateTime  @default(now())
-  refreshed_at DateTime? // Set 1 month after use (token refresh rule).
+  granted_at           DateTime  @default(now())
+  refreshed_at         DateTime? // Set 1 month after use (token refresh rule).
 
   flags AccountFlag[] @relation("FlagTokenGrant")
 
@@ -396,28 +404,28 @@ model TokenRequestThread {
 // ---------------------------------------------------------------------------
 
 model AccountFlag {
-  flag_id    String     @id @default(uuid())
+  flag_id                String      @id @default(uuid())
   // Meaning of the flagged account differs by flag_type:
   //  - bad_peer_token_grant: the GRANTING educator.
   //  - ve_conduct_review:    the educator whose own conduct is under review.
-  account_id String
-  account    Account    @relation("FlagAccount", fields: [account_id], references: [account_id])
-  flag_type  FlagType
+  account_id             String
+  account                Account     @relation("FlagAccount", fields: [account_id], references: [account_id])
+  flag_type              FlagType
   // Populated for bad_peer_token_grant only; the specific disputed grant.
   related_token_grant_id String?
   related_token_grant    TokenGrant? @relation("FlagTokenGrant", fields: [related_token_grant_id], references: [grant_id])
-  status     FlagStatus @default(pending)
-  reason     String
+  status                 FlagStatus  @default(pending)
+  reason                 String
   // Primary moderator who initiates the review.
-  reviewed_by String?
-  reviewer    Account?   @relation("FlagReviewer", fields: [reviewed_by], references: [account_id])
+  reviewed_by            String?
+  reviewer               Account?    @relation("FlagReviewer", fields: [reviewed_by], references: [account_id])
   // Second moderator who independently weighs in. A ve_conduct_review ESS lock
   // fires only when BOTH reviewers are set (two distinct accounts) AND status is
   // confirmed; a disagreeing secondary sets status = dismissed instead.
-  secondary_reviewed_by String?
-  secondary_reviewer    Account? @relation("FlagSecondaryReviewer", fields: [secondary_reviewed_by], references: [account_id])
-  created_at  DateTime   @default(now())
-  resolved_at DateTime?
+  secondary_reviewed_by  String?
+  secondary_reviewer     Account?    @relation("FlagSecondaryReviewer", fields: [secondary_reviewed_by], references: [account_id])
+  created_at             DateTime    @default(now())
+  resolved_at            DateTime?
 
   @@index([account_id])
   @@index([flag_type])
@@ -441,26 +449,26 @@ model AwardCategory {
 }
 
 model AwardInstance {
-  instance_id String        @id @default(uuid())
-  category_id String
-  category    AwardCategory @relation(fields: [category_id], references: [category_id])
-  cycle_label String? // e.g. "2026", only for cyclical categories.
-  target_id   String // The seed/module/account that won.
+  instance_id                String        @id @default(uuid())
+  category_id                String
+  category                   AwardCategory @relation(fields: [category_id], references: [category_id])
+  cycle_label                String? // e.g. "2026", only for cyclical categories.
+  target_id                  String // The seed/module/account that won.
   winning_creator_account_id String?
-  winning_creator            Account? @relation(fields: [winning_creator_account_id], references: [account_id])
-  date_granted DateTime @default(now())
+  winning_creator            Account?      @relation(fields: [winning_creator_account_id], references: [account_id])
+  date_granted               DateTime      @default(now())
 
   @@index([category_id])
 }
 
 model AwardNomination {
-  nomination_id         String  @id @default(uuid())
-  nominator_account_id  String
-  nominator             Account @relation(fields: [nominator_account_id], references: [account_id])
-  target_id             String
-  rationale             String // Required.
-  adjudicated_by        String? // Moderator, or platform-competition process.
-  created_at            DateTime @default(now())
+  nomination_id        String   @id @default(uuid())
+  nominator_account_id String
+  nominator            Account  @relation(fields: [nominator_account_id], references: [account_id])
+  target_id            String
+  rationale            String // Required.
+  adjudicated_by       String? // Moderator, or platform-competition process.
+  created_at           DateTime @default(now())
 
   @@index([nominator_account_id])
 }
@@ -502,7 +510,7 @@ model Taxonomy {
   parent      Taxonomy?     @relation("TaxonomyParent", fields: [parent_id], references: [taxonomy_id])
   children    Taxonomy[]    @relation("TaxonomyParent")
 
-  version      Int      @default(1)
+  version       Int       @default(1)
   deprecated_at DateTime?
 
   // Admin-set flag marking a government-or-political-systems Topic. Module Editor
@@ -532,24 +540,24 @@ model Taxonomy {
 // A Learning Seed (Section 5.1). Minimal, reusable pedagogical object carrying
 // no domain flavor. NO authoring gate — any Community Member may create one.
 model LearningSeed {
-  seed_id               String @id @default(uuid())
-  architect_account_id  String
-  architect             Account @relation(fields: [architect_account_id], references: [account_id])
+  seed_id              String  @id @default(uuid())
+  architect_account_id String
+  architect            Account @relation(fields: [architect_account_id], references: [account_id])
 
-  learning_objective  String
-  entry_prerequisite  String
+  learning_objective      String
+  entry_prerequisite      String
   // GENUINELY UNRESOLVED shape (Open Items) — only ever illustrated for Math.
   // Deliberately a loose JSON column, NOT over-designed; expected to firm up
   // through actual use of the editor, not from more spec work.
   algorithmic_constraints Json?
-  lesson_size_scope   String // Explicitly declared, not implicit.
+  lesson_size_scope       String // Explicitly declared, not implicit.
 
   subject_id String
   subject    Taxonomy @relation("SeedSubject", fields: [subject_id], references: [taxonomy_id])
   topic_id   String
   topic      Taxonomy @relation("SeedTopic", fields: [topic_id], references: [taxonomy_id])
 
-  grade_range                  String  // Free-text, deliberately not sortable.
+  grade_range                    String // Free-text, deliberately not sortable.
   target_learner_characteristics String? // Optional.
 
   // Content language, needed for the language-coverage query (Task 3). Not in
@@ -572,18 +580,18 @@ model LearningSeed {
   published_at DateTime? // Set when status → published; drives the daily quota.
   // Soft delete (same convention as Stage 1's Account). Deleting a published
   // seed frees a quota slot without losing the row for referential integrity.
-  deleted_at DateTime?
+  deleted_at   DateTime?
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  invites      SeedDraftInvite[]
-  comments     SeedDraftComment[]
-  revisions    SeedRevision[]
-  reports      SeedReport[]
-  modules      ContextualizedModule[] // Modules whose primary seed is this seed.
-  chain_edges_out SeedChain[] @relation("ChainFrom")
-  chain_edges_in  SeedChain[] @relation("ChainTo")
+  invites         SeedDraftInvite[]
+  comments        SeedDraftComment[]
+  revisions       SeedRevision[]
+  reports         SeedReport[]
+  modules         ContextualizedModule[] // Modules whose primary seed is this seed.
+  chain_edges_out SeedChain[]            @relation("ChainFrom")
+  chain_edges_in  SeedChain[]            @relation("ChainTo")
 
   @@index([architect_account_id])
   @@index([topic_id])
@@ -596,16 +604,16 @@ model LearningSeed {
 // Chains are defined at the seed level and DECOUPLED from taxonomy structure;
 // multiple competing chains can coexist in one Topic, distinguished by chain_key.
 model SeedChain {
-  chain_edge_id String   @id @default(uuid())
+  chain_edge_id String       @id @default(uuid())
   topic_id      String
-  topic         Taxonomy @relation(fields: [topic_id], references: [taxonomy_id])
+  topic         Taxonomy     @relation(fields: [topic_id], references: [taxonomy_id])
   // Distinguishes competing chains within the same Topic.
   chain_key     String
   from_seed_id  String
   from_seed     LearningSeed @relation("ChainFrom", fields: [from_seed_id], references: [seed_id])
   to_seed_id    String
   to_seed       LearningSeed @relation("ChainTo", fields: [to_seed_id], references: [seed_id])
-  created_at    DateTime @default(now())
+  created_at    DateTime     @default(now())
 
   @@unique([chain_key, from_seed_id, to_seed_id])
   @@index([topic_id])
@@ -615,12 +623,12 @@ model SeedChain {
 // Draft-sharing invite (Section 7.1). The architect invites SPECIFIC registered
 // accounts (never open links). Auto-revoked on submission to Pending Review.
 model SeedDraftInvite {
-  invite_id          String   @id @default(uuid())
+  invite_id          String       @id @default(uuid())
   seed_id            String
   seed               LearningSeed @relation(fields: [seed_id], references: [seed_id])
   invited_account_id String
-  invited_account    Account  @relation(fields: [invited_account_id], references: [account_id])
-  invited_at         DateTime @default(now())
+  invited_account    Account      @relation(fields: [invited_account_id], references: [account_id])
+  invited_at         DateTime     @default(now())
   revoked_at         DateTime? // Set automatically on submission to Pending Review.
 
   @@index([seed_id])
@@ -632,18 +640,18 @@ model SeedDraftInvite {
 // VE (Library's endorsement-return-to-draft flow) — same table, same mechanism,
 // no hardcoded actor type, so Library reuses it without a schema change.
 model SeedDraftComment {
-  comment_id           String   @id @default(uuid())
+  comment_id           String             @id @default(uuid())
   seed_id              String
-  seed                 LearningSeed @relation(fields: [seed_id], references: [seed_id])
+  seed                 LearningSeed       @relation(fields: [seed_id], references: [seed_id])
   commenter_account_id String
-  commenter            Account  @relation(fields: [commenter_account_id], references: [account_id])
+  commenter            Account            @relation(fields: [commenter_account_id], references: [account_id])
   // Optional threading: a reply points at its parent comment.
   parent_comment_id    String?
-  parent_comment       SeedDraftComment? @relation("CommentThread", fields: [parent_comment_id], references: [comment_id])
+  parent_comment       SeedDraftComment?  @relation("CommentThread", fields: [parent_comment_id], references: [comment_id])
   replies              SeedDraftComment[] @relation("CommentThread")
   body                 String
-  status               SeedCommentStatus @default(open) // Set by the architect.
-  created_at           DateTime @default(now())
+  status               SeedCommentStatus  @default(open) // Set by the architect.
+  created_at           DateTime           @default(now())
   resolved_at          DateTime?
 
   @@index([seed_id])
@@ -663,11 +671,11 @@ model SeedDraftComment {
 // quota. Each revision stores a FULL SNAPSHOT of the seed's content (not a diff).
 // History is view-only: there is deliberately NO restore-to-a-prior-revision.
 model SeedRevision {
-  revision_id       String  @id @default(uuid())
+  revision_id       String       @id @default(uuid())
   seed_id           String
   seed              LearningSeed @relation(fields: [seed_id], references: [seed_id])
   editor_account_id String
-  editor            Account @relation("RevisionEditor", fields: [editor_account_id], references: [account_id])
+  editor            Account      @relation("RevisionEditor", fields: [editor_account_id], references: [account_id])
   // Sequential per seed (1-based), for stable ordering of queryable history.
   revision_number   Int
 
@@ -699,7 +707,7 @@ model SeedRevision {
   created_at DateTime @default(now())
 
   // Modules pinned to this exact archived revision (Module Editor Task 1).
-  modules_primary       ContextualizedModule[] @relation("ModulePrimaryRevision")
+  modules_primary        ContextualizedModule[] @relation("ModulePrimaryRevision")
   module_secondary_seeds ModuleSecondarySeed[]
 
   @@unique([seed_id, revision_number])
@@ -723,14 +731,14 @@ enum StandingScoreType {
 }
 
 model StandingScore {
-  standing_score_id String            @id @default(uuid())
-  account_id        String
-  account           Account           @relation(fields: [account_id], references: [account_id])
-  score_type        StandingScoreType
+  standing_score_id      String            @id @default(uuid())
+  account_id             String
+  account                Account           @relation(fields: [account_id], references: [account_id])
+  score_type             StandingScoreType
   // MUST be decimal (not integer): DSS has a +0.1 trigger an integer column
   // would silently round away.
-  current_value     Decimal           @db.Decimal(6, 2)
-  locked_at         DateTime? // Set when the value hits 0 (or a direct trigger).
+  current_value          Decimal           @db.Decimal(6, 2)
+  locked_at              DateTime? // Set when the value hits 0 (or a direct trigger).
   // Drives the lazy weekly-drift calculation (Task 2); not a display field.
   last_drift_computed_at DateTime
 
@@ -742,20 +750,20 @@ model StandingScore {
 // The Historical Infraction Record (Section 10.6). APPEND-ONLY — rows are never
 // updated or deleted.
 model StandingScoreEvent {
-  event_id   String            @id @default(uuid())
-  account_id String
-  account    Account           @relation("EventAccount", fields: [account_id], references: [account_id])
-  score_type StandingScoreType
-  point_delta Decimal          @db.Decimal(6, 2) // Positive or negative.
+  event_id             String            @id @default(uuid())
+  account_id           String
+  account              Account           @relation("EventAccount", fields: [account_id], references: [account_id])
+  score_type           StandingScoreType
+  point_delta          Decimal           @db.Decimal(6, 2) // Positive or negative.
   // Extensible label, e.g. ve_token_rescinded, seed_report_dss_egregious, ess_lock.
-  event_type String
+  event_type           String
   // moderator_account_id and explanation are required TOGETHER whenever an entry
   // results from a moderator decision; neither is required for a system-triggered
   // (e.g. numeric 0-floor lock) event. Enforced in lib/standing-scores.ts.
   moderator_account_id String?
-  moderator            Account? @relation("EventModerator", fields: [moderator_account_id], references: [account_id])
+  moderator            Account?          @relation("EventModerator", fields: [moderator_account_id], references: [account_id])
   explanation          String?
-  created_at           DateTime @default(now())
+  created_at           DateTime          @default(now())
 
   @@index([account_id])
   @@index([score_type])
@@ -842,13 +850,13 @@ enum ModuleReportStatus {
 }
 
 model ContextualizedModule {
-  module_id         String @id @default(uuid())
+  module_id         String  @id @default(uuid())
   author_account_id String
   author            Account @relation(fields: [author_account_id], references: [account_id])
 
   // Exactly one mandatory primary seed — what educator endorsement vouches for.
-  primary_seed_id   String
-  primary_seed      LearningSeed @relation(fields: [primary_seed_id], references: [seed_id])
+  primary_seed_id          String
+  primary_seed             LearningSeed @relation(fields: [primary_seed_id], references: [seed_id])
   // Pinned at creation, permanent: the exact archived SeedRevision the module was
   // built against (a real FK, not a bare version string). Editing the seed later
   // creates a new revision but never retroactively changes this citation.
@@ -864,7 +872,7 @@ model ContextualizedModule {
   // seed's chain relationships / the pinned revision (see lib/modules.ts), not
   // stored columns.
 
-  version          Int  @default(0) // Increments on publish, not on autosave.
+  version          Int       @default(0) // Increments on publish, not on autosave.
   publication_date DateTime?
 
   // Author-declared at submission; locks permanently if ai_pipeline (Task 2).
@@ -900,10 +908,12 @@ model ContextualizedModule {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  pages            ModulePage[]
-  reports          ModuleReport[]
-  review_decisions ModuleReviewDecision[]
-  appeals          ModuleReviewAppeal[]
+  pages               ModulePage[]
+  reports             ModuleReport[]
+  review_decisions    ModuleReviewDecision[]
+  appeals             ModuleReviewAppeal[]
+  // Live (unpinned) references from lesson-plan playlists (Lesson Planner).
+  lesson_plan_entries LessonPlanModule[]     @relation("LessonPlanModuleRef")
 
   @@index([author_account_id])
   @@index([primary_seed_id])
@@ -912,11 +922,11 @@ model ContextualizedModule {
 
 // Join table pinning each secondary seed citation to a specific SeedRevision.
 model ModuleSecondarySeed {
-  id                String @id @default(uuid())
-  module_id         String
-  module            ContextualizedModule @relation(fields: [module_id], references: [module_id], onDelete: Cascade)
-  seed_revision_id  String
-  seed_revision     SeedRevision @relation(fields: [seed_revision_id], references: [revision_id])
+  id               String               @id @default(uuid())
+  module_id        String
+  module           ContextualizedModule @relation(fields: [module_id], references: [module_id], onDelete: Cascade)
+  seed_revision_id String
+  seed_revision    SeedRevision         @relation(fields: [seed_revision_id], references: [revision_id])
 
   @@unique([module_id, seed_revision_id])
   @@index([module_id])
@@ -925,7 +935,7 @@ model ModuleSecondarySeed {
 // --- Authoring model (Task 7) ------------------------------------------------
 
 model ModuleTemplate {
-  template_id    String @id @default(uuid())
+  template_id    String  @id @default(uuid())
   name           String
   description    String?
   // Pre-arranged element positions/types/placeholder content, instantiated into
@@ -936,14 +946,14 @@ model ModuleTemplate {
 }
 
 model ModulePage {
-  page_id     String @id @default(uuid())
+  page_id     String               @id @default(uuid())
   module_id   String
   module      ContextualizedModule @relation(fields: [module_id], references: [module_id], onDelete: Cascade)
   page_order  Int
   // Informational: which template this page started from (if any). Does NOT
   // constrain later edits — a template is a prefill, not a locked mode.
   template_id String?
-  template    ModuleTemplate? @relation(fields: [template_id], references: [template_id])
+  template    ModuleTemplate?      @relation(fields: [template_id], references: [template_id])
 
   elements ModuleElement[]
 
@@ -972,17 +982,17 @@ model ModuleElement {
 // --- Content-governance review (Task 5) --------------------------------------
 
 model ModuleReviewDecision {
-  decision_id          String             @id @default(uuid())
+  decision_id          String               @id @default(uuid())
   module_id            String
   module               ContextualizedModule @relation(fields: [module_id], references: [module_id])
   moderator_account_id String
-  moderator            Account            @relation("ModuleDecisionModerator", fields: [moderator_account_id], references: [account_id])
+  moderator            Account              @relation("ModuleDecisionModerator", fields: [moderator_account_id], references: [account_id])
   decision             ModuleDecisionType
   // Structured citation required on a rejection (nullable when retained).
   cited_clause         CitedClause?
   section_reference    String? // The specific module section identified.
   rationale            String
-  created_at           DateTime @default(now())
+  created_at           DateTime             @default(now())
 
   appeals ModuleReviewAppeal[]
 
@@ -990,19 +1000,19 @@ model ModuleReviewDecision {
 }
 
 model ModuleReviewAppeal {
-  appeal_id           String                   @id @default(uuid())
-  module_id           String
-  module              ContextualizedModule     @relation(fields: [module_id], references: [module_id])
+  appeal_id            String                   @id @default(uuid())
+  module_id            String
+  module               ContextualizedModule     @relation(fields: [module_id], references: [module_id])
   original_decision_id String
-  original_decision   ModuleReviewDecision     @relation(fields: [original_decision_id], references: [decision_id])
-  status              ModuleReviewAppealStatus @default(pending)
+  original_decision    ModuleReviewDecision     @relation(fields: [original_decision_id], references: [decision_id])
+  status               ModuleReviewAppealStatus @default(pending)
   // Panel of 3+ distinct reviewers (app-enforced), spanning varied backgrounds,
   // not limited to credentialed VEs. Stored as a plain UUID array (soft
   // references) — the per-element FK a relation would need isn't expressible on
   // an array; distinctness/count is enforced in lib/module-reports.ts.
-  panel_reviewer_ids  String[]
-  panel_rationale     String?
-  resolved_at         DateTime?
+  panel_reviewer_ids   String[]
+  panel_rationale      String?
+  resolved_at          DateTime?
 
   @@index([module_id])
 }
@@ -1010,25 +1020,121 @@ model ModuleReviewAppeal {
 // --- Report-driven takedown (Task 4) — mirrors SeedReport exactly ------------
 
 model ModuleReport {
-  report_id           String             @id @default(uuid())
+  report_id           String               @id @default(uuid())
   module_id           String
   module              ContextualizedModule @relation(fields: [module_id], references: [module_id])
   reporter_account_id String
-  reporter            Account            @relation("ModuleReportReporter", fields: [reporter_account_id], references: [account_id])
+  reporter            Account              @relation("ModuleReportReporter", fields: [reporter_account_id], references: [account_id])
   reason              String
   // The module version this report was filed against — the takedown trigger and
   // its disarm state are per-version (Task 4).
   module_version      Int
   // True if filed against a version a moderator already cleared ("previously
   // reviewed") — such reports route to the queue only, never auto-takedown.
-  previously_reviewed Boolean            @default(false)
-  status              ModuleReportStatus @default(pending)
-  created_at          DateTime           @default(now())
+  previously_reviewed Boolean              @default(false)
+  status              ModuleReportStatus   @default(pending)
+  created_at          DateTime             @default(now())
   resolved_at         DateTime?
   resolved_by         String?
-  resolver            Account?           @relation("ModuleReportResolver", fields: [resolved_by], references: [account_id])
+  resolver            Account?             @relation("ModuleReportResolver", fields: [resolved_by], references: [account_id])
 
   @@index([module_id])
   @@index([reporter_account_id])
   @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Workshop — Lesson Planner (Section 12.1). A "playlist" of published modules
+// a community member curates and an (possibly different) assigner hands to
+// learners. Deliberately un-gated: no VE-status check and no DSS authoring lock
+// on creation or assignment (curation of already-vetted content is not
+// authoring). See lib/lesson-plans.ts.
+// ---------------------------------------------------------------------------
+
+model LessonPlan {
+  lesson_plan_id     String   @id @default(uuid())
+  // Any community member — no role restriction, no VE requirement (Task 1).
+  creator_account_id String
+  creator            Account  @relation("LessonPlanCreator", fields: [creator_account_id], references: [account_id])
+  title              String
+  is_public          Boolean  @default(false)
+  created_at         DateTime @default(now())
+
+  // The ordered playlist. Each entry references the LIVE module_id (a real FK to
+  // ContextualizedModule), NOT a pinned version or SeedRevision — the OPPOSITE of
+  // how a Module pins its seed. Curation is the point: a lesson plan always
+  // reflects a module's CURRENT published state, never a frozen snapshot of what
+  // it was when added (Task 1, confirmed by test).
+  module_sequence LessonPlanModule[]
+
+  assignments      LessonPlanAssignment[]
+  reports          LessonPlanReport[]
+  // Back-relation for the FK closed on ParentApproval.lesson_plan_id below.
+  parent_approvals ParentApproval[]
+
+  @@index([creator_account_id])
+  @@index([is_public])
+}
+
+// Ordered join row: position gives the playlist order (add / remove / reorder).
+// The module reference is live — resolving it always joins to the module's
+// current row, so an edit to the module surfaces immediately in every plan.
+model LessonPlanModule {
+  id             String               @id @default(uuid())
+  lesson_plan_id String
+  lesson_plan    LessonPlan           @relation(fields: [lesson_plan_id], references: [lesson_plan_id], onDelete: Cascade)
+  module_id      String
+  module         ContextualizedModule @relation("LessonPlanModuleRef", fields: [module_id], references: [module_id])
+  position       Int
+
+  @@index([lesson_plan_id])
+  @@index([module_id])
+}
+
+// A single assignment instance: one lesson plan, one assigner (NOT necessarily
+// the creator), a set of learners, and a date range. Each assignment is its own
+// record so the same plan handed to different cohorts never conflates their data
+// (Task 2). assigned_learner_ids mirrors the String[]-of-account-ids convention
+// already used by ModuleReviewAppeal.panel_reviewer_ids (Prisma has no
+// array-of-FK relation).
+model LessonPlanAssignment {
+  assignment_id        String     @id @default(uuid())
+  lesson_plan_id       String
+  lesson_plan          LessonPlan @relation(fields: [lesson_plan_id], references: [lesson_plan_id], onDelete: Cascade)
+  assigner_account_id  String
+  assigner             Account    @relation("LessonPlanAssigner", fields: [assigner_account_id], references: [account_id])
+  assigned_learner_ids String[]
+  date_range_start     DateTime
+  date_range_end       DateTime
+  created_at           DateTime   @default(now())
+
+  @@index([lesson_plan_id])
+  @@index([assigner_account_id])
+}
+
+// Free-text `title` vandalism gap — the same lightweight shape as SeedReport (no
+// auto-escalation ladder). A moderator resolves by correcting the title or
+// deactivating the plan (is_public → false); CSS consequences applied in
+// lib/lesson-plan-reports.ts (Task 3).
+model LessonPlanReport {
+  report_id           String                 @id @default(uuid())
+  lesson_plan_id      String
+  lesson_plan         LessonPlan             @relation(fields: [lesson_plan_id], references: [lesson_plan_id])
+  reporter_account_id String
+  reporter            Account                @relation("LessonPlanReportReporter", fields: [reporter_account_id], references: [account_id])
+  reason              String
+  status              LessonPlanReportStatus @default(pending)
+  created_at          DateTime               @default(now())
+  resolved_at         DateTime?
+  resolved_by         String?
+  resolver            Account?               @relation("LessonPlanReportResolver", fields: [resolved_by], references: [account_id])
+
+  @@index([lesson_plan_id])
+  @@index([reporter_account_id])
+  @@index([status])
+}
+
+enum LessonPlanReportStatus {
+  pending
+  resolved
 }
