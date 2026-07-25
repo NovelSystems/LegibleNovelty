@@ -12,10 +12,12 @@ same name), which treats a good learning artifact as one that is *contextually i
 *recoverable*, *signaled*, and *bounded* — novel and engaging on the surface, but legibly
 anchored to a concrete objective underneath.
 
-> **Status:** early build. The design is fully resolved at the specification level; the code
-> is at **Stage 0 — the local development substrate everything else runs on**. See
-> [Build status](#build-status) for what exists today versus what is designed but not yet
-> built.
+> **Status:** early build. The design is fully resolved at the specification level. The code
+> covers **Stage 0 and 1, all three Workshop sub-stages (Seed Editor, Module Editor, Lesson
+> Planner), and the cross-cutting Standing Scores system** — all on a single unmerged branch,
+> much of it wired against stubbed references that stay inert until deferred subsystems land. See
+> [Build status](#build-status) for exactly what exists, what's deferred, and what's still
+> unsettled.
 
 ---
 
@@ -51,66 +53,167 @@ is the authoritative source for product behaviour.
 
 ## Build status
 
-The project is built in stages. **Stages 0 and 1, the cross-cutting Standing Scores system, and
-all three Workshop sub-stages (Seed Editor, Module Editor, Lesson Planner) are complete.**
-Everything below them is designed and specified, not yet implemented.
+The project is built in stages. What follows is a genuine snapshot, not a changelog: it says
+what exists, what doesn't, and what is still unsettled. Read the deferred and open-items sections
+below as carefully as this one — several "complete" pieces are wired against stubbed references
+and won't do anything real until a deferred subsystem lands.
 
-- ✅ **Stage 0 — Infrastructure substrate.** A fully local, zero-cost
-  Docker environment: PostgreSQL, the Node application container, and a Mailpit email catcher;
-  Auth.js wired for revocable **database sessions** via the Prisma adapter; a single-command
-  check script standing in for CI. No cloud accounts or paid services required to run it.
-- ✅ **Stage 1 — User Management _(this repo, today)_.** The real `Account` schema and
-  identity substrate built on Stage 0's revocable sessions: core authentication (signup,
-  login/logout, password reset, email verification); the account lifecycle (dates of birth,
-  child sub-accounts, automatic graduation, parent dormancy/deletion, deactivation, purge and
-  reclaim, platform-wide display-name reuse blocking); Connection/ParentApproval; Share Contact
-  Information; Verified Educator verification (institutional/directory, license-holder, and
-  peer-token paths) with peer-token accountability; account status badges; an Awards backend
-  schema (no user-facing surface); and the seven account/authentication email triggers. The
-  Awards **frontend** and business logic remain deferred.
-- ✅ **Workshop — Seed Editor _(first of three Workshop sub-stages)_.** Learning Seed schema
-  (no authoring gate), the two-level Subject→Topic Taxonomy, Seed Chains with backend
-  coverage/gap/density/language-coverage queries (the curriculum-map view itself is deferred),
-  the private draft-sharing/comment workflow (invite-only, threaded, auto-revoke on submission),
-  the two asymmetric placement paths (self-service revision vs. endorsement placement-flag
-  return-to-Draft), and the anti-spam publish quota (3 concurrent pre-endorsement → 10/day
-  after, resetting at midnight `America/Los_Angeles`). Module Editor and Lesson Planner remain
-  deferred; Endorsement itself is Library's.
-- ✅ **Standing Scores (ESS / DSS / CSS) — cross-cutting governance.** One shared
-  `StandingScore` table (score_type discriminator, decimal value) with lazy read-time weekly
-  drift (no scheduler), a 0-lock with per-score consequences, uniform restoration to 5, and an
-  append-only `StandingScoreEvent` infraction record. Wired against what exists: ESS lock
-  revokes `ve_status`/`lnc_status` (and a confirmed `ve_conduct_review` flag now triggers it
-  directly); DSS lock is retrofitted into the Seed Editor authoring/publish path; a new
-  `SeedReport` path closes the free-text vandalism gap, resolving through the existing
-  SeedRevision moderator-edit system. Module Editor / Library triggers remain unwired.
-- ✅ **Workshop — Module Editor _(second of three Workshop sub-stages)_.** Contextualized Module
-  schema (primary seed pinned to an exact `SeedRevision`, secondary seeds pinned the same way);
-  the lifecycle state machine (Draft → Pending Review → [Moderation Hold] → Published, version on
-  publish); the two deterministic publication-gate checks (commission + seed alignment);
-  report-driven takedown (1→hold, 2→auto-takedown, disarm-on-clear, re-arm on new version) wired
-  into Standing Scores (CSS to reporter, DSS tier to author, one transaction) reusing the exact
-  DSS authoring-lock and shared report cap; the content-governance review layer (structured
-  clause citation, Taxonomy-based escalation tier, 3+-reviewer appeals); the age-based under-18
-  endorsement visibility gate (reusing Stage 1's 18+ check); and the page/element/template
-  authoring model with nested fillable fields. Endorsement/Library consuming logic is Library's.
-- ✅ **Workshop — Lesson Planner _(third and final Workshop sub-stage)_.** The `LessonPlan`
-  "playlist" model — an ordered sequence of **live** `module_id` references (deliberately NOT
-  pinned to a version/`SeedRevision`, the opposite of Module's seed pin, so a plan always
-  reflects a module's current published state); the creator/assigner distinction as separately
-  tracked roles; per-instance `LessonPlanAssignment` records (learners + date range) that keep
-  the same plan across multiple cohorts from conflating data; `LessonPlanReport` closing the
-  free-text-title vandalism gap, reusing SeedReport's shape and the now-four-way combined daily
-  report cap (comments-ready, modules, seeds, lesson plans), with CSS on both sides (reporter
-  +5/-2, creator -5/-20); the per-learner/per-module tracking dashboard built against a stubbed
-  completion signal; and the completion-submission prompt trigger/routing keyed off the
-  assignment. Deliberately **un-gated**: no VE-status and no DSS authoring-lock on creation or
-  assignment. Closes Stage 1's open `ParentApproval.lesson_plan_id` soft reference with a real
-  FK. Real completion data and the prompt's gating remain Library's.
-- ⬜ **Later subsystems.** Library (browse/search/reading, endorsement, lesson plans),
-  Workshop (seed & module authoring, commission marketplace, moderation), Certification Center
-  (the LNC mini-LMS), Communication (comments, Big Questions, forum), Notification, and
-  Payments & Billing.
+Each completed piece gets one line here; the linked brief in [`docs/briefs/`](./docs/briefs) is
+the authoritative detail for it, and [`docs/LN_Webapp_Design_v0.13.md`](./docs/LN_Webapp_Design_v0.13.md)
+is the authoritative source for overall product behaviour.
+
+### What exists today
+
+Everything below is **complete and tested against a fresh database** (see [Running the
+checks](#running-the-checks)). All of it lives on a single unmerged branch — see
+[Branch and PR state](#branch-and-pr-state).
+
+- ✅ **Stage 0 — Infrastructure substrate.** The local, zero-cost Docker environment (PostgreSQL,
+  the Node app container, a Mailpit email catcher, Auth.js on revocable **database sessions**, and
+  `scripts/check.sh` standing in for CI) that everything else runs on.
+- ✅ **Stage 1 — User Management.** The real `Account` identity substrate: authentication, the
+  account lifecycle (child sub-accounts, graduation, deactivation/purge/reclaim, display-name
+  reuse blocking), Connection/ParentApproval, Share Contact, Verified Educator verification with
+  peer-token accountability, status badges, an Awards backend schema, and seven email triggers.
+  → [`docs/briefs/Stage1_User_Management.md`](./docs/briefs/Stage1_User_Management.md)
+- ✅ **Workshop — Seed Editor** _(first of three Workshop sub-stages)_. Learning Seed schema with
+  no authoring gate, the two-level Subject→Topic Taxonomy, Seed Chains (with backend
+  coverage/gap/density/language-coverage queries), the invite-only draft-comment workflow, the two
+  asymmetric placement paths, and the anti-spam publish quota.
+  → [`docs/briefs/Workshop_SeedEditor.md`](./docs/briefs/Workshop_SeedEditor.md)
+- ✅ **Workshop — Module Editor** _(second of three)_. Contextualized Module schema (primary and
+  secondary seeds each pinned to an exact `SeedRevision`), the lifecycle/version state machine, the
+  two deterministic publication-gate checks, report-driven takedown wired into Standing Scores, the
+  content-governance review/appeal layer, the under-18 endorsement visibility gate, and the
+  page/element/template authoring model.
+  → [`docs/briefs/Workshop_ModuleEditor.md`](./docs/briefs/Workshop_ModuleEditor.md)
+- ✅ **Workshop — Lesson Planner** _(third of three)_. The `LessonPlan` "playlist" of **live**
+  (unpinned) module references, the creator/assigner distinction, per-instance
+  `LessonPlanAssignment` records, `LessonPlanReport`, the per-learner/per-module tracking dashboard
+  against a stubbed completion signal, and the completion-submission prompt. Deliberately un-gated
+  (no VE and no DSS check on creation or assignment); closes Stage 1's `ParentApproval.lesson_plan_id`
+  soft reference with a real FK.
+  → [`docs/briefs/Workshop_LessonPlanner.md`](./docs/briefs/Workshop_LessonPlanner.md)
+- ✅ **Standing Scores (ESS / DSS / CSS) — cross-cutting governance, _not_ a fourth Workshop
+  sub-stage.** One shared `StandingScore` table (type discriminator, decimal value, lazy read-time
+  weekly drift, a 0-lock latch, restoration) plus an append-only `StandingScoreEvent` record. It
+  spans subsystems: DSS gates Seed/Module authoring, CSS drives report outcomes, ESS governs VE
+  standing. Many of its triggers are built but **unwired**, waiting on deferred subsystems (see
+  below). → [`docs/briefs/StandingScores.md`](./docs/briefs/StandingScores.md)
+
+### Branch and PR state
+
+**All of the above lives on one feature branch (`claude/legible-novelty-stage-1-6u9tfw`) and has
+not been merged.** There is no PR open and nothing has landed on the default branch yet. "Complete"
+here means built, migrated, and passing `scripts/check.sh` on that branch — not released. Treat the
+branch as the source of truth for current state; do not assume any of this is on `main`.
+
+### What's explicitly deferred, and why it matters here
+
+Pulled from each brief's "Explicitly deferred" section. These aren't just unbuilt neighbours — each
+one has already-built code pointing at it through a stub or soft reference, so it's load-bearing for
+things that look done:
+
+- **Library — Endorsement.** Module Editor's under-18 endorsement visibility gate, the "Seed
+  Architect" earned title, and DSS/ESS's endorsement-driven payouts are all built against
+  `Account.first_seed_endorsement_received` (a real column **nothing currently sets** — Endorsement
+  will).
+- **Library — Community Recommendation.** DSS's `+0.1`-per-recommendation trigger and ESS's
+  "+5, first endorser at 10 recommendations" trigger have schema support but no source of
+  recommendation events until this exists.
+- **Library — Progress Archive + Quiz/Test/Scoring.** The Lesson Planner tracking dashboard and the
+  completion-submission prompt run entirely against a **stubbed completion signal**; the real
+  per-learner completion and score data comes from here (Sections 7.4–7.5).
+- **Library — browse / search / reading, ranking, sort, filters.** The public reading experience
+  itself; Module Editor exposes the FK targets it needs and builds none of the consuming logic.
+- **Communication — `Post`/`Comment` (`thread_type`) model.** Stage 1's `TokenRequestThread` is a
+  deliberate stopgap to be folded into this; CSS's comment-report outcome triggers wait on it.
+- **Communication — Big Questions interactive mechanic.** The read-only archive is Library's; the
+  submission/participation mechanic is Communication's. Neither is touched.
+- **Commission Marketplace.** Fell out of the Workshop three-way split and **still needs its own
+  scoping**. Module Editor's commission-alignment publication check is a deliberate structural
+  no-op, and `associated_commission_id` on seeds and modules is an unenforced soft reference, both
+  until real structured commission fields exist.
+- **Certification Center (LNC mini-LMS).** `Account.lnc_status` and `veframework_onboarding_passed`
+  exist as columns but nothing sets them; LNC's "retake the free certification test" ESS-restoration
+  path waits on it.
+- **Payments & Billing.** `Account.fotl_status` is a placeholder column; this is also Certification
+  Center's own dependency.
+- **DEF Arbitration (Phase 2).** Module Editor reserves a nullable `prepublication_review_report`
+  column for the eventual report; the AI pre-publication review itself is compute-dependent Phase 2.
+- **AI authoring wizard.** Deferred pending an established contributor base and an unresolved pricing
+  model; Module Editor's `AiAttestation` lock rule exists in anticipation of it.
+- **Escalation panel staffing.** Module Editor builds the appeal **schema** (`ModuleReviewAppeal`,
+  3+ distinct reviewers); the panel's actual staffing/recruitment is marked "pending Phase 1
+  staffing decision" in the governance policy and is not built.
+
+### Open items still genuinely unresolved
+
+These come straight from the briefs' "Open items carried forward" sections. They fall into **two
+different categories** — don't flatten them together:
+
+**(a) Proposed-but-unconfirmed design choices** — built one specific way, but flagged as not
+confirmed; changing them is a decision, not a bug:
+
+- **Creator-side CSS tiers for lesson-plan report resolution** (`insufficiency 0 / inappropriate -5
+  / egregious -20`) — proposed, mirroring DSS's severity shape scaled to CSS. New scope the Standing
+  Scores brief predates.
+- **Seed-report Standing Score values** — CSS `+5/-2` to the reporter and the DSS severity tier to
+  the architect are a proposed synthesis connecting two previously separate threads, not confirmed.
+- **Escalation-tier routing via Taxonomy** — inferred to reuse Seed Editor's
+  `Taxonomy.is_political_systems` placement rather than a standalone module-level tag; not explicitly
+  confirmed.
+- **Secondary-seed revision-pinning** — each secondary seed is pinned to a `SeedRevision` like the
+  primary; this is an inferred requirement, not stated in the source.
+- **Publish quota applies uniformly regardless of role** — no VE/Admin exemption from the
+  pre-endorsement cap; not stated either way, worth confirming.
+- **The "different VE than the original granter" ESS-restoration constraint is no longer enforced
+  anywhere** after the restore-then-grant reordering (the dead `canRestoreEss` helper was deleted);
+  re-adding it is a separate design decision.
+- **Publish-immediately posture** (Module Editor Task 3) is explicitly tied to the pilot's small,
+  known user base and should be revisited before any wider launch.
+- **Template creation is built admin-only** (the narrower default); whether module authors can
+  create their own reusable templates is unconfirmed.
+
+**(b) Genuinely open questions with no current answer** — the schema tolerates them being unresolved,
+but nobody has decided:
+
+- **`algorithmic_constraints` JSON shape for non-Math seeds** — only ever illustrated for Math
+  (numeric ranges); no equivalent structure exists for Literacy or Science. The single biggest open
+  modeling question; expected to resolve through actual use of the seed editor, not up-front design.
+- **Taxonomy topic-proposal workflow** — how a VE's proposed Topic actually routes to System_Admin
+  approval is undecided; the table exists without it.
+- **`veframework_onboarding_passed`'s gating mechanism** (quiz vs. completion, and its sequencing
+  relative to VE verification) — the column is a placeholder; the mechanism is undecided.
+- **`AwardCategory.eligibility_threshold`** type and value — genuinely unset pending platform
+  activity data; left nullable rather than guessing a placeholder that could later read as real.
+- **Maximum page count per module** — none is built because none was specified.
+- **Whether unendorsed content is search-reachable only, or also passively surfaced** (browse,
+  recommendations, homepage) to adult accounts — Library's call, not assumed here.
+- **Whether VE endorsement should be scoped/revocable per module version** vs. platform-wide is
+  marked "pending design decision" in the governance policy itself.
+
+### Cross-cutting patterns worth knowing before touching this code
+
+Brief callouts; the real detail lives in the referenced files.
+
+- **The latch (Standing Scores).** `StandingScore.locked_at` is what gates functionality — the
+  numeric `current_value` moves independently under drift and can even climb while locked; only
+  restoration clears `locked_at`. Never infer lock state from the value. See `lib/standing-scores.ts`.
+- **One shared report-quota cap.** A single function, `combinedReportsTodayCount`
+  (`lib/report-quota.ts`), enforces the 3/day midnight-Pacific cap across seeds, modules, and lesson
+  plans in one place (comment reports slot into the same function when Communication ships) — don't
+  add a per-type cap.
+- **`event_type` is a free-text string, not an enum.** Every `StandingScoreEvent.event_type` value
+  (`module_dss_egregious`, `lesson_plan_removed_unclassified`, …) is an unconstrained `String`. This
+  is a **known, flagged risk, not yet fixed**: a typo fails silently and only the tests guard it.
+  Promoting these to an enum is a deliberate cross-cutting migration, out of scope so far.
+- **Module pins; LessonPlan deliberately does NOT — they look alike and are opposite by design.** A
+  `ContextualizedModule` pins to an exact `SeedRevision` (`primary_seed_revision_id`,
+  `ModuleSecondarySeed.seed_revision_id`) and never retroactively changes. A `LessonPlan` stores the
+  **live** `module_id` (`LessonPlanModule.module_id`) so it always reflects the module's current
+  published version. **Do not copy the pinning pattern from Module into Lesson Planner out of habit** —
+  the difference is intentional (curation tracks the current artifact; a citation freezes it).
 
 **Two boundaries worth knowing up front:**
 
@@ -215,22 +318,28 @@ up — rebuild with `docker compose down -v` and bring the environment back up.
 ├── app/                     # Next.js App Router (routes, actions, components)
 │   └── api/auth/[...nextauth]/route.ts
 ├── auth.ts                  # Auth.js config: Account-backed adapter + database sessions
-├── lib/                     # Stage 1 service layer (accounts, lifecycle, verification, …)
+├── lib/                     # Service layer — one module per feature area (see below)
 ├── prisma/
-│   ├── schema.prisma        # Stage 1: Account + full User Management schema
-│   └── migrations/          # Committed migration history
+│   ├── schema.prisma        # Full schema: User Management + Seed/Module/Lesson + Standing Scores
+│   └── migrations/          # Committed migration history (8 migrations, additive)
 ├── db/init/                 # Postgres init (shadow + test databases, UTF-8)
-├── tests/                   # Vitest: auth, lifecycle, VE flows, flags, badges, email
+├── tests/                   # Vitest: auth, lifecycle, seeds, modules, lesson plans, governance, …
+├── docs/                    # Authoritative specs: LN_Webapp_Design + per-stage briefs/
 ├── scripts/check.sh         # Manual CI substitute
 ├── docker-compose.yml       # postgres + app + mailpit
 ├── Dockerfile               # node:24-alpine + Corepack
 └── .env.example             # Documents required environment variables
 ```
 
-Stage 1 replaces Stage 0's placeholder `User` with the real `Account` model and the rest of
-the User Management schema (Connection, ParentApproval, VerificationApplication, TokenGrant,
-AccountFlag, TokenRequestThread, and the Awards backend tables). The real seeds,
-modules, and everything else arrive with their respective subsystems.
+The `lib/` service layer has grown past Stage 1 to cover the merged sub-stages: `accounts`,
+`lifecycle`, `connections`, `contact`, `verification`, `flags`, `badges`, `grade` (User
+Management); `seeds`, `curriculum`, `quota` (Seed Editor); `modules`, `module-authoring`,
+`module-reports`, `module-visibility` (Module Editor); `lesson-plans`, `lesson-plan-dashboard`,
+`lesson-plan-reports` (Lesson Planner); and the cross-cutting `standing-scores`, `report-quota`,
+`seed-reports`, and `pacific-time`. The single `prisma/schema.prisma` now holds every table for
+all of these; the schema names are the source of truth. Subsystems that are still deferred
+(Library, Communication, Commission Marketplace, Certification Center, Payments) bring their own
+tables when they land.
 
 ---
 
