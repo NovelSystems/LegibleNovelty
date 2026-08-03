@@ -14,11 +14,13 @@ anchored to a concrete objective underneath.
 
 > **Status:** early build. The design is fully resolved at the specification level. The code
 > covers **Stage 0 and 1, all three Workshop sub-stages (Seed Editor, Module Editor, Lesson
-> Planner), the cross-cutting Standing Scores system, and the first Library sub-stage (Endorsement
-> & Community Recommendation)** — all on a single unmerged branch. The Library sub-stage closes
-> more forward-built stubs than any prior one: it is what finally sets
-> `Account.first_seed_endorsement_received`, wires the previously-dormant endorsement/recommendation
-> Standing Score triggers, and resolves the module "public section" visibility question. See
+> Planner), the cross-cutting Standing Scores system, and the first two Library sub-stages
+> (Endorsement & Community Recommendation; Search, Ranking & Discovery)** — all on a single unmerged
+> branch. Endorsement & Recommendation closed more forward-built stubs than any prior sub-stage — it
+> is what finally sets `Account.first_seed_endorsement_received`, wires the previously-dormant
+> endorsement/recommendation Standing Score triggers, and resolves the module "public section"
+> visibility question. Search/Ranking/Discovery then builds the sort/filter/homepage/quick-search
+> layer that reads that trust data. See
 > [Build status](#build-status) for exactly what exists, what's deferred, and what's still
 > unsettled.
 
@@ -114,6 +116,17 @@ checks](#running-the-checks)). All of it lives on a single unmerged branch — s
   first-endorsement "public section" promotion, and the DSS `+5/+1/+0.1` and ESS `+5/-5` Standing
   Score triggers (reusing the existing helpers).
   → [`docs/briefs/Library_EndorsementRecommendation.md`](./docs/briefs/Library_EndorsementRecommendation.md)
+- ✅ **Library — Search, Ranking & Discovery** _(second Library sub-stage)_. The five sort modes and
+  their formulas with the AI-attestation multiplier (`lib/search.ts`, reading the existing
+  `ai_attestation`), the full filter set (context tag, free-text-substring grade, subject/topic,
+  language, binary endorsement status, attestation tier — combining Context OR-within / AND-across),
+  the cascading-window homepage list (`lib/homepage.ts`: 2 weeks → 2 months → anytime, ranked by
+  Weighted Approval, up to 20, static empty state), and the Quick Search backend helpers (cascading
+  Subject→Topic, alphabetical Context options, "use my interests"). Adds `context_tag`,
+  `download_count`, and `passing_completion_count` to `ContextualizedModule`. Usage sorts are wired
+  and tested against stubbed download/completion counts (nothing populates them until PDF Generation
+  and Quiz/Scoring land).
+  → [`docs/briefs/Library_SearchRankingDiscovery.md`](./docs/briefs/Library_SearchRankingDiscovery.md)
 
 ### Branch and PR state
 
@@ -128,16 +141,17 @@ Pulled from each brief's "Explicitly deferred" section. These aren't just unbuil
 one has already-built code pointing at it through a stub or soft reference, so it's load-bearing for
 things that look done:
 
-- **Library — Sort Modes / Filters / Homepage Module List / Quick Search** (Sections 9.3–9.7). These
-  consume the Endorsement/Recommendation data the first Library sub-stage now produces, but are a
-  different kind of build (query/ranking/UI, not the core trust actions). Next Library sub-stage. The
-  endorsement-status binary, the combined-count total, and the `CommunityRecommendation.module_version`
-  snapshot they will rank against all exist now.
-- **Library — Progress Archive + Quiz/Test/Scoring.** The Lesson Planner tracking dashboard and the
-  completion-submission prompt run entirely against a **stubbed completion signal**; the real
-  per-learner completion and score data comes from here (Sections 7.4–7.5).
-- **Library — browse / search / reading, ranking, sort, filters.** The public reading experience
-  itself; Module Editor exposes the FK targets it needs and builds none of the consuming logic.
+- **Library — Reading mechanics: Printable/Downloadable Format, Quiz/Test/Scoring, Progress Archive**
+  (Sections 7.3–7.5). Separate Library sub-stage. This is also the source of the two Usage-sort inputs
+  Search/Ranking already wired but cannot populate: `download_count` depends on PDF Generation
+  (Section 15) and `passing_completion_count` on Quiz/Scoring (Section 7.4). Both columns exist and
+  the Usage formulas read them; nothing increments them yet. The Lesson Planner tracking dashboard and
+  completion-submission prompt likewise run against a **stubbed completion signal** until this lands.
+- **Library — Named filter presets** (Section 9.5's own "deferred to the UI build phase," Section 18).
+  The one-click "Endorsed + Weighted Approval" style presets sit on top of the filter/sort primitives
+  Search/Ranking just built.
+- **PDF Generation (Section 15).** Feeds `download_count` and the printable artifact; Section 22 never
+  assigns it to a subsystem (still flagged). The endorsement-status binary it stamps on covers exists.
 - **Communication — `Post`/`Comment` (`thread_type`) model.** Stage 1's `TokenRequestThread` is a
   deliberate stopgap to be folded into this; CSS's comment-report outcome triggers wait on it.
 - **Communication — Big Questions interactive mechanic.** The read-only archive is Library's; the
@@ -200,6 +214,18 @@ confirmed; changing them is a decision, not a bug:
   22's broader reading is correct (Section 4.3 gives LNC-holders the same endorsement ability), so the
   live check is `ve_status || lnc_status`. `lnc_status` has no source until Certification Center ships,
   so the LNC path is currently unreachable but implemented and tested.
+- **Grade-level filter is a free-text SUBSTRING match, not a numeric range.** Seed Editor deliberately
+  made `grade_range` free-text/non-sortable; the Search sub-stage now needs to filter on it, so it
+  does a case-insensitive `contains` match. Worth revisiting whether that original non-sortable
+  decision should change now that filtering against the same field is a stated requirement.
+- **AI-attestation multiplier for AI Pipeline / null attestation is 1× (inference).** The doc gives
+  10×/2× for the two live tiers and "1×" for the deferred AI Pipeline tier; a NULL attestation is
+  undefined. Both are treated as the neutral 1× (no boost) — the safe, non-advantaging default. Adjust
+  in `lib/search.ts:ATTESTATION_MULTIPLIER` if a different call is made.
+- **`context_tag` / `download_count` / `passing_completion_count` are retroactive `ContextualizedModule`
+  additions** the Search sub-stage makes, not in Module Editor's original field list — same category as
+  Seed Editor's `language`/`published_at` additions. `download_count` and `passing_completion_count`
+  are populated by nothing yet (PDF Generation and Quiz/Scoring are unbuilt).
 
 **(b) Genuinely open questions with no current answer** — the schema tolerates them being unresolved,
 but nobody has decided:
@@ -232,6 +258,18 @@ but nobody has decided:
 - **Section 15 (PDF cover / print generation) is unassigned in the Section 22 subsystem map** — the
   same category of gap as the earlier Taxonomy/Section-6 omission. It depends on the endorsement-status
   binary this sub-stage produces but is its own downstream artifact concern; not resolved here.
+- **Homepage domain-diversity capping** (Section 9.6) — whether to cap consecutive modules from the
+  same Subject/Context on the highest-visibility page. The design doc leaves it explicitly undecided;
+  the Search sub-stage does not default it either way (the list ranks purely by Weighted Approval).
+- **Context listbox collapse behaviour** (Section 9.7) — the listbox is specified NOT to auto-collapse
+  on blur; what closes it (an explicit control, or staying open for the panel's lifetime) is undecided.
+  A frontend/UI concern, unresolved.
+- **"Use my interests" loading indicator** (Section 9.7) — whether a spinner shows between click and
+  result, or the fetch is assumed fast enough. Undecided; the backend helper (`useMyInterests`) is
+  agnostic to it.
+- **Usage sorts are unexercisable with real data** until PDF Generation (`download_count`) and
+  Quiz/Scoring (`passing_completion_count`) land. The formulas are built and tested against stubbed
+  counts; nothing populates the columns yet.
 
 ### Cross-cutting patterns worth knowing before touching this code
 
@@ -361,7 +399,7 @@ up — rebuild with `docker compose down -v` and bring the environment back up.
 ├── lib/                     # Service layer — one module per feature area (see below)
 ├── prisma/
 │   ├── schema.prisma        # Full schema: User Management + Seed/Module/Lesson + Standing Scores + Library
-│   └── migrations/          # Committed migration history (9 migrations, additive)
+│   └── migrations/          # Committed migration history (11 migrations, additive)
 ├── db/init/                 # Postgres init (shadow + test databases, UTF-8)
 ├── tests/                   # Vitest: auth, lifecycle, seeds, modules, lesson plans, governance, …
 ├── docs/                    # Authoritative specs: LN_Webapp_Design + per-stage briefs/
@@ -376,8 +414,9 @@ The `lib/` service layer has grown past Stage 1 to cover the merged sub-stages: 
 Management); `seeds`, `curriculum`, `quota` (Seed Editor); `modules`, `module-authoring`,
 `module-reports`, `module-visibility` (Module Editor); `lesson-plans`, `lesson-plan-dashboard`,
 `lesson-plan-reports` (Lesson Planner); `endorsement` and `eligibility` (Library — Endorsement &
-Community Recommendation); and the cross-cutting `standing-scores`, `report-quota`, `seed-reports`,
-and `pacific-time`. The single `prisma/schema.prisma` now holds every table for all of these; the
+Community Recommendation); `search` and `homepage` (Library — Search, Ranking & Discovery); and the
+cross-cutting `standing-scores`, `report-quota`, `seed-reports`, and `pacific-time`. The single
+`prisma/schema.prisma` now holds every table for all of these; the
 schema names are the source of truth. Subsystems that are still deferred (the rest of Library,
 Communication, Commission Marketplace, Certification Center, Payments) bring their own tables when
 they land.

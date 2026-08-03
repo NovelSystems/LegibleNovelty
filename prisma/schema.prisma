@@ -892,6 +892,23 @@ model ContextualizedModule {
   prepublication_review_report String? // Section 8 DEF/Justice report (Phase 2).
   flair_tags                   String[] @default([]) // Groundwork only, no UI.
 
+  // Library — Search/Ranking/Discovery (Sections 9.5–9.7). Added by that
+  // sub-stage, NOT in Module Editor's original field list (flagged as a
+  // retroactive addition, same category as Seed Editor's language/published_at).
+  //
+  // context_tag: the single special-interest ("Context") tag Section 9.7's Quick
+  // Search listbox filters on — "each module carries exactly one Context tag", so
+  // the multi-select OR is a single-column `IN (...)` check, not a join. Nullable:
+  // a module need not have one set.
+  context_tag              String?
+  // Usage-sort inputs (Sections 9.3). Nothing increments these yet — downloads
+  // depend on PDF Generation (Section 15, unbuilt) and passing completions on
+  // Quiz/Scoring (Section 7.4, deferred). The columns exist so the Weighted/
+  // Unweighted Usage formulas have real fields to read once those land, the same
+  // forward-building pattern as everything else in this project.
+  download_count           Int     @default(0)
+  passing_completion_count Int     @default(0)
+
   status ModuleStatus @default(draft)
 
   // Version whose automatic-takedown trigger a moderator has cleared (disarmed).
@@ -938,6 +955,7 @@ model ContextualizedModule {
   @@index([author_account_id])
   @@index([primary_seed_id])
   @@index([status])
+  @@index([context_tag]) // Library Quick Search Context filter (IN check).
 }
 
 // Join table pinning each secondary seed citation to a specific SeedRevision.
