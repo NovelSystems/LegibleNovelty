@@ -62,7 +62,7 @@ Status: all major systems are resolved at the design level. The remaining work i
 
 #### 9.1 Endorsement (per-seed, not per-module)
 
-- Only Verified Educators may endorse.
+- Only Verified Educators may endorse. **Correction (matches Section 22's characterization):** endorsement eligibility is **VE _or_ LNC**, not VE-only — Section 22's summary of this section says "for Endorsement, VE/LNC status specifically," and an LNC-certified account holds the same functional endorsement ability without Verified Educator status (Section 4.3). The permission check is `ve_status = true OR lnc_status = true`. (`lnc_status` has no source until Certification Center ships, so the LNC path is currently unreachable but implemented.)
 - Endorsement is a binary toggle: clicking again removes it.
 - Endorsement applies per seed-tag, not per module. A module's primary seed and each secondary seed each carry their own independent endorsement state.
 - A secondary seed is "proposed" until independently endorsed, at which point it behaves identically to an endorsed primary seed for search purposes.

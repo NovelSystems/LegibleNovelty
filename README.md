@@ -105,7 +105,7 @@ checks](#running-the-checks)). All of it lives on a single unmerged branch — s
   recommendation-driven** triggers stayed unwired until the Library sub-stage below activated them.
   → [`docs/briefs/StandingScores.md`](./docs/briefs/StandingScores.md)
 - ✅ **Library — Endorsement & Community Recommendation** _(first Library sub-stage)_. The per-seed
-  VE-only `Endorsement` and per-module eligibility-gated `CommunityRecommendation` models (both
+  VE-or-LNC `Endorsement` and per-module eligibility-gated `CommunityRecommendation` models (both
   additive-only binary toggles, hard-delete on toggle-off), the single shared 7-day/completed-profile
   eligibility gate (`lib/eligibility.ts`, reused by comments and commission-support later), and the
   wiring of every stub left waiting on it: `Account.first_seed_endorsement_received` (and thus the
@@ -195,10 +195,11 @@ confirmed; changing them is a decision, not a bug:
   interest domain + at least one language preference — an inference (Section 9.5 requires "a completed
   profile" but never enumerates fields). It lives in one place (`lib/eligibility.ts:isProfileComplete`);
   adjust there and every call site follows.
-- **Endorsement is scoped to `ve_status` only.** Section 4.3 grants LNC-holders the same endorsement
-  ability, but this brief (and its acceptance criteria) scope creation to `ve_status = true`, and
-  nothing sets `lnc_status` until Certification Center ships. Widening the live check to
-  `ve_status || lnc_status` is the one-line change to make then.
+- **Endorsement eligibility is VE-or-LNC (resolved).** Section 9.1's prose said "only Verified
+  Educators," but Section 22's summary of the same section says "VE/LNC status specifically"; Section
+  22's broader reading is correct (Section 4.3 gives LNC-holders the same endorsement ability), so the
+  live check is `ve_status || lnc_status`. `lnc_status` has no source until Certification Center ships,
+  so the LNC path is currently unreachable but implemented and tested.
 
 **(b) Genuinely open questions with no current answer** — the schema tolerates them being unresolved,
 but nobody has decided:
@@ -219,10 +220,15 @@ but nobody has decided:
   seed — the Library sub-stage wires ONLY the primary-seed "public section" promotion (consistent with
   the primary seed being the credential-bearing one); whether secondary-seed endorsement should do
   anything visibility-wise is untouched.
-- **The "edited under you" line-count delta is not computable yet.** The warning fires correctly, but
-  its pull-request-style "N lines were modified" number is left null: a real delta needs a pre-edit
-  content/line snapshot, and Module Editor's authoring model persists only `last_edited_at` (a single
-  timestamp). Filling the number needs Module Editor to store an edit-diff baseline.
+- **The "edited under you" delta is measured in ELEMENTS, not lines.** Module content is page/element
+  JSON with no "lines", so the warning quantifies change as the net `ModuleElement`-count delta since
+  the current version's publish (a new `ContextualizedModule.published_element_count` baseline set at
+  publish) — the structural analog of a line delta. Two honest limits, both from Module Editor
+  persisting no per-edit changelog: it is a NET count (pure in-place text edits, or equal add/remove
+  churn, read as 0), and the baseline is publish-time (change *on this version since it went live*,
+  surfaced alongside the within-the-hour recency trigger, not a strict trailing-60-minute window). A
+  character-level or true trailing-window delta would need an edit-diff baseline Module Editor does not
+  keep.
 - **Section 15 (PDF cover / print generation) is unassigned in the Section 22 subsystem map** — the
   same category of gap as the earlier Taxonomy/Section-6 omission. It depends on the endorsement-status
   binary this sub-stage produces but is its own downstream artifact concern; not resolved here.

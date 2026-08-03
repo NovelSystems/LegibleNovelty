@@ -909,6 +909,14 @@ model ContextualizedModule {
   // warning trigger and line-count delta consumption are Library's.
   last_edited_at DateTime?
 
+  // Element-count baseline snapshotted at each publish (count of this module's
+  // ModuleElement rows when the current version went live). Module content is
+  // page/element JSON with no notion of "lines", so Library's "edited under you"
+  // warning quantifies change as an ELEMENT-count delta (current count minus this
+  // baseline) — the structural analog of the design's line-count delta. Nullable
+  // for modules never published (no live version to have baselined).
+  published_element_count Int?
+
   // Library idempotency latch: the ESS +5 "first endorser" reward (paid when the
   // module reaches 10 Community Recommendations, Section 9-linked Standing Score
   // trigger) fires exactly once per module. Set true when paid so a toggle-driven
@@ -1162,23 +1170,23 @@ enum LessonPlanReportStatus {
 
 // Endorsement (Section 9.1) — PER-SEED, not per-module. A module's primary seed
 // and each secondary seed carry independent endorsement state, so this row keys
-// on `seed_id`, never `module_id`. Only a Verified Educator may create one, and
-// that `ve_status = true` check is made LIVE at action time in lib/endorsement.ts
-// (not a cached column here).
+// on `seed_id`, never `module_id`. Endorsement eligibility is VE-OR-LNC, checked
+// LIVE at action time in lib/endorsement.ts (not a cached column here).
 //
 // TOGGLE = HARD DELETE: clicking again removes the endorsement. Unlike
 // StandingScoreEvent's append-only infraction log, there is no stated need to
 // retain a removed endorsement's history, so a removed endorsement leaves no
 // row — a plain unique constraint over (seed, endorser) enforces "at most one
-// live endorsement per VE per seed" and makes the toggle a create/delete pair.
+// live endorsement per endorser per seed" and makes the toggle a create/delete
+// pair.
 //
-// FLAGGED TENSION (LNC): master design Section 4.3 grants LNC-holders "the same
-// functional endorsement ability" as VEs, but this brief's Task 1 and its
-// acceptance criteria scope endorsement creation to `ve_status = true`
-// specifically. LNC (Certification Center) is not built yet — nothing sets
-// `lnc_status` — so the live check is ve_status-only for now; widening it to
-// `ve_status || lnc_status` is the one-line change to make when LNC ships. See
-// the delivery summary.
+// VE-OR-LNC (resolved): Section 9.1's prose reads "only Verified Educators may
+// endorse," but Section 22's summary of the same section says "for Endorsement,
+// VE/LNC status specifically" — Section 22's broader reading is correct, and an
+// LNC-certified account holds the same functional endorsement ability without VE
+// status (Section 4.3). The live check is `ve_status || lnc_status`. Nothing sets
+// `lnc_status` yet (Certification Center is deferred), so the LNC branch is
+// unreachable in practice today but implemented correctly regardless.
 model Endorsement {
   endorsement_id String @id @default(uuid())
 

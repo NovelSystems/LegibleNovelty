@@ -34,6 +34,7 @@ import {
   submitForReview as submitModuleLifecycle,
   touchModuleEdited,
 } from "@/lib/modules";
+import { addPage, createElement } from "@/lib/module-authoring";
 import { PublishQuotaError } from "@/lib/quota";
 import { makeAccount, dobForAge } from "./helpers/factory";
 import { makeTaxonomyPair, publishSeedFixture } from "./helpers/seed-factory";
@@ -108,7 +109,35 @@ describe("Library — Endorsement (Section 9.1, Task 1)", () => {
     expect(await seedHasEndorsement(seed.seed_id)).toBe(true);
   });
 
-  it("checks ve_status LIVE at action time, not a cached assumption", async () => {
+  it("lets an LNC-certified account (no VE status) endorse — VE OR LNC, per Section 22", async () => {
+    const architect = await makeAccount();
+    const seed = await seedBy(architect.account_id);
+    // lnc_status set directly (Certification Center, which normally sets it,
+    // doesn't exist yet); ve_status is explicitly false.
+    const lncOnly = await makeAccount();
+    await prisma.account.update({
+      where: { account_id: lncOnly.account_id },
+      data: { ve_status: false, lnc_status: true },
+    });
+
+    const { created } = await createEndorsement({
+      seedId: seed.seed_id,
+      endorserAccountId: lncOnly.account_id,
+    });
+    expect(created).toBe(true);
+    expect(await seedHasEndorsement(seed.seed_id)).toBe(true);
+  });
+
+  it("still rejects an account with neither VE nor LNC status", async () => {
+    const architect = await makeAccount();
+    const seed = await seedBy(architect.account_id);
+    const plain = await makeAccount(); // ve_status false, lnc_status false
+    await expect(
+      createEndorsement({ seedId: seed.seed_id, endorserAccountId: plain.account_id }),
+    ).rejects.toBeInstanceOf(EndorsementError);
+  });
+
+  it("checks endorsement eligibility LIVE at action time, not a cached assumption", async () => {
     const architect = await makeAccount();
     const seed = await seedBy(architect.account_id);
     const formerVe = await ve();
@@ -341,11 +370,49 @@ describe("Library — edited-under-you warning (Task 5)", () => {
     expect(warn).not.toBeNull();
     expect(warn?.editedWithinLastHour).toBe(true);
     expect(warn?.minutesSinceEdit).toBe(30);
+    // No elements were added/removed, so the element-count delta is 0 (the module
+    // still has its single text element from publish).
+    expect(warn?.currentElementCount).toBe(1);
+    expect(warn?.elementCountDelta).toBe(0);
 
     // An edit older than an hour before the attempt does NOT warn.
     expect(
       await getEditedUnderYouWarning(module.module_id, new Date("2026-02-01T04:00:00Z")),
     ).toBeNull();
+  });
+
+  it("quantifies the warning as an element-count delta against the publish-time baseline", async () => {
+    const architect = await makeAccount();
+    const seed = await seedBy(architect.account_id);
+    const author = await makeAccount();
+
+    const t1 = new Date("2026-07-01T00:00:00Z");
+    // Published with a single element → baseline element count = 1.
+    const module = await makeModuleWithText(author.account_id, seed.seed_id, "content", t1);
+    await submitModuleLifecycle(module.module_id, author.account_id, t1);
+    await publishModuleLifecycle(module.module_id, author.account_id, t1);
+
+    // Arm with an endorsement, then add two more elements and edit within the hour.
+    const veAcct = await ve();
+    const tSignal = new Date("2026-07-01T01:00:00Z");
+    await createEndorsement({ seedId: seed.seed_id, endorserAccountId: veAcct.account_id }, tSignal);
+
+    const page = await addPage(module.module_id, 1);
+    await createElement(page.page_id, {
+      element_type: "text", position_x: 0, position_y: 0, width: 10, height: 10, z_index: 0,
+      content: { plainText: "added one" },
+    });
+    await createElement(page.page_id, {
+      element_type: "text", position_x: 0, position_y: 20, width: 10, height: 10, z_index: 1,
+      content: { plainText: "added two" },
+    });
+    const tEdit = new Date("2026-07-01T01:30:00Z");
+    await touchModuleEdited(module.module_id, author.account_id, tEdit);
+
+    const warn = await getEditedUnderYouWarning(module.module_id, new Date("2026-07-01T02:00:00Z"));
+    expect(warn).not.toBeNull();
+    expect(warn?.currentElementCount).toBe(3); // 1 at publish + 2 added
+    expect(warn?.elementCountDelta).toBe(2); // net +2 since the version went live
   });
 
   it("does not flag an edit made before the current version's first signal", async () => {

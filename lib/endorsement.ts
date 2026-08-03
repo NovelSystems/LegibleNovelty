@@ -53,6 +53,30 @@ export function moduleRecommendationCount(moduleId: string): Promise<number> {
   return prisma.communityRecommendation.count({ where: { module_id: moduleId } });
 }
 
+// Endorsement eligibility is VE-OR-LNC, checked LIVE at action time. Section 9.1's
+// prose says "only Verified Educators may endorse," but Section 22's summary of
+// that same section says "for Endorsement, VE/LNC status specifically" — the two
+// conflict, and Section 22's broader reading is the correct one: an LNC-certified
+// account holds the same functional endorsement ability without VE status
+// (Section 4.3). Nothing sets `lnc_status` yet (Certification Center is deferred),
+// so the LNC branch is unreachable in practice today; it is implemented correctly
+// anyway, the same discipline as building DSS's lock-check before anything could
+// trigger a lock.
+async function assertMayEndorse(
+  db: Prisma.TransactionClient | typeof prisma,
+  accountId: string,
+) {
+  const acct = await db.account.findUniqueOrThrow({
+    where: { account_id: accountId },
+    select: { ve_status: true, lnc_status: true },
+  });
+  if (!acct.ve_status && !acct.lnc_status) {
+    throw new EndorsementError(
+      "Only a Verified Educator or an LNC-certified account may endorse.",
+    );
+  }
+}
+
 // The VE who endorsed a module's PRIMARY seed earliest (by created_at) among the
 // endorsements that currently exist. This is the "who was first" the ESS +5
 // reward and the ESS -5 rejection penalty both target (Task 6). Because the
@@ -113,16 +137,8 @@ export async function createEndorsement(
   now: Date = new Date(),
 ): Promise<CreateEndorsementResult> {
   const result = await prisma.$transaction(async (tx) => {
-    // Live VE check at action time (Task 1) — read the row now, inside the tx.
-    const endorser = await tx.account.findUniqueOrThrow({
-      where: { account_id: args.endorserAccountId },
-      select: { ve_status: true },
-    });
-    if (!endorser.ve_status) {
-      throw new EndorsementError(
-        "Only a Verified Educator may endorse a seed.",
-      );
-    }
+    // Live VE-or-LNC check at action time (Task 1) — read the row now, in the tx.
+    await assertMayEndorse(tx, args.endorserAccountId);
 
     const seed = await tx.learningSeed.findUnique({
       where: { seed_id: args.seedId },
@@ -288,15 +304,10 @@ export async function flagSeedPlacementDuringEndorsement(args: {
   veAccountId: string;
   body: string;
 }) {
-  const ve = await prisma.account.findUniqueOrThrow({
-    where: { account_id: args.veAccountId },
-    select: { ve_status: true },
-  });
-  if (!ve.ve_status) {
-    throw new EndorsementError(
-      "Only a Verified Educator may flag placement during endorsement review.",
-    );
-  }
+  // Flagging placement is part of endorsement review, so it uses the same
+  // VE-or-LNC eligibility as endorsing itself (an LNC reviewer can raise the
+  // same objection a VE can).
+  await assertMayEndorse(prisma, args.veAccountId);
   return veFlagPlacement({
     seedId: args.seedId,
     veAccountId: args.veAccountId,
@@ -525,13 +536,24 @@ export interface EditedUnderYouWarning {
   editedWithinLastHour: true;
   lastEditedAt: Date;
   minutesSinceEdit: number;
-  // Pull-request-style "N lines were modified in the past hour" delta. Left null
-  // and FLAGGED: computing a real line-count delta requires a pre-edit content
-  // snapshot, which Module Editor's authoring model does not currently persist
-  // (only last_edited_at, a single timestamp, is tracked). Surfacing the warning
-  // and its recency is this brief's job; filling this number needs Module Editor
-  // to store an edit-diff/line baseline. See the delivery summary.
-  lineCountDelta: number | null;
+  // The quantified "how much changed" signal (design Section 9.2's line-count
+  // delta). Module content is page/element JSON, not text lines, so the delta is
+  // measured in ELEMENTS — the structural analog the reviewer identified: the net
+  // change in the module's ModuleElement count since the current version was
+  // published (currentElementCount - published_element_count). Positive = elements
+  // added, negative = removed.
+  //
+  // Two honest limitations, both rooted in what Module Editor persists (only
+  // last_edited_at and now this publish-time baseline, no per-edit changelog):
+  //   * it is a NET count, so pure in-place text edits — and equal add/remove
+  //     churn — register as 0; and
+  //   * the baseline is publish-time, so the delta is "structural change to this
+  //     version since it went live", which the warning surfaces alongside the
+  //     within-the-hour recency trigger rather than a strict trailing-60-minute
+  //     window. A finer character-level or true trailing-window delta would need
+  //     Module Editor to persist an edit-diff baseline it currently does not.
+  elementCountDelta: number;
+  currentElementCount: number;
 }
 
 // Detects the Section 9.2 "edited under you" condition for the NEXT person about
@@ -557,6 +579,7 @@ export async function getEditedUnderYouWarning(
       version: true,
       publication_date: true,
       last_edited_at: true,
+      published_element_count: true,
     },
   });
 
@@ -593,10 +616,17 @@ export async function getEditedUnderYouWarning(
   const sinceEditMs = now.getTime() - module.last_edited_at.getTime();
   if (sinceEditMs > HOUR_MS || sinceEditMs < 0) return null;
 
+  // Element-count delta against the current version's publish-time baseline.
+  const currentElementCount = await prisma.moduleElement.count({
+    where: { page: { module_id: moduleId } },
+  });
+  const baseline = module.published_element_count ?? currentElementCount;
+
   return {
     editedWithinLastHour: true,
     lastEditedAt: module.last_edited_at,
     minutesSinceEdit: Math.floor(sinceEditMs / 60000),
-    lineCountDelta: null,
+    elementCountDelta: currentElementCount - baseline,
+    currentElementCount,
   };
 }
