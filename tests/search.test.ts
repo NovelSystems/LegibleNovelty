@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import type { AiAttestation } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
@@ -10,7 +10,15 @@ import {
   useMyInterests,
   isUseMyInterestsEnabled,
 } from "@/lib/search";
-import { homepageModules, HOMEPAGE_EMPTY_MESSAGE } from "@/lib/homepage";
+import {
+  homepageModules,
+  mostRecentSignalOf,
+  pickCascadeTier,
+  buildHomepageResult,
+  HOMEPAGE_EMPTY_MESSAGE,
+  type HomepageWindow,
+} from "@/lib/homepage";
+import type { SearchResult } from "@/lib/search";
 import { createEndorsement, createCommunityRecommendation } from "@/lib/endorsement";
 import { publishModule, submitForReview as submitModule } from "@/lib/modules";
 import { makeAccount } from "./helpers/factory";
@@ -44,7 +52,9 @@ interface ModuleOpts {
   endorsements?: number;
   recommendations?: number;
   publicationDate?: Date;
-  signalDate?: Date;
+  signalDate?: Date; // default timestamp for both signal types
+  endorseDate?: Date; // overrides signalDate for endorsements
+  recDate?: Date; // overrides signalDate for recommendations
   taxonomy?: { subject: { taxonomy_id: string }; topic: { taxonomy_id: string } };
 }
 
@@ -84,15 +94,17 @@ async function publishedModule(opts: ModuleOpts = {}) {
   });
 
   const signalDate = opts.signalDate ?? pubDate;
+  const endorseDate = opts.endorseDate ?? signalDate;
+  const recDate = opts.recDate ?? signalDate;
   for (let i = 0; i < (opts.endorsements ?? 0); i++) {
     const ve = await makeAccount({ ve: true });
-    await createEndorsement({ seedId: seed.seed_id, endorserAccountId: ve.account_id }, signalDate);
+    await createEndorsement({ seedId: seed.seed_id, endorserAccountId: ve.account_id }, endorseDate);
   }
   for (let i = 0; i < (opts.recommendations ?? 0); i++) {
     const u = await makeEligible();
     await createCommunityRecommendation(
       { moduleId: module.module_id, recommenderAccountId: u.account_id },
-      signalDate,
+      recDate,
     );
   }
 
@@ -259,75 +271,122 @@ describe("Library — filters (Section 9.5)", () => {
   });
 });
 
-describe("Library — homepage cascading window (Section 9.6)", () => {
-  // The homepage scans globally (it IS the homepage — no filter). The shared test
-  // DB carries endorsed modules from other files, so before each homepage test we
-  // clear the two LEAF signal tables (FK-safe; nothing references them). That
-  // empties the public-section pool so each test's own modules are the only
-  // endorsed/discoverable ones. Modules from other files remain but are now
-  // unendorsed → excluded from the homepage, exactly as an unendorsed module
-  // should be. This runs during this file's execution only (files run serially),
-  // so it never races another file's data.
-  beforeEach(async () => {
-    await prisma.communityRecommendation.deleteMany({});
-    await prisma.endorsement.deleteMany({});
+// The homepage query is genuinely GLOBAL — it is the homepage, with no filter —
+// so the cascade-tier selection, the two-signal recency rule, and the empty-state
+// mapping are proven here with PURE unit tests on synthetic inputs. These are
+// fully deterministic and depend on no shared-table state or test-execution order
+// (unlike the earlier approach, which wiped the shared signal tables and leaned on
+// serial file execution). The DB-backed tests that follow then only assert
+// properties robust to whatever other data exists — set membership and the
+// relative order of two specific modules — never exact global result sets or the
+// globally-determined tier.
+describe("Library — homepage cascade logic (pure, Section 9.6)", () => {
+  const NOW = new Date("2026-08-01T00:00:00Z");
+  const daysAgo = (n: number) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000);
+
+  it("mostRecentSignalOf returns the later signal, or whichever exists", () => {
+    const older = daysAgo(100);
+    const newer = daysAgo(1);
+    expect(mostRecentSignalOf(older, newer)).toEqual(newer);
+    expect(mostRecentSignalOf(newer, older)).toEqual(newer);
+    expect(mostRecentSignalOf(older, null)).toEqual(older);
+    expect(mostRecentSignalOf(null, newer)).toEqual(newer);
+    expect(mostRecentSignalOf(null, null)).toBeNull();
   });
 
+  it("cascades 2 weeks → 2 months → anytime by qualifying count", () => {
+    const items = [
+      { id: "a", mostRecentSignal: daysAgo(3) }, // in 2wk
+      { id: "b", mostRecentSignal: daysAgo(30) }, // in 2mo, not 2wk
+      { id: "c", mostRecentSignal: daysAgo(100) }, // only anytime
+    ];
+    // limit 1: the 2-week pool already has `a`.
+    const t1 = pickCascadeTier(items, NOW, 1);
+    expect(t1.windowUsed).toBe("2_weeks");
+    expect([...t1.eligibleIds]).toEqual(["a"]);
+    // limit 2: 2wk has 1 (<2) → widen to 2mo (a,b).
+    const t2 = pickCascadeTier(items, NOW, 2);
+    expect(t2.windowUsed).toBe("2_months");
+    expect([...t2.eligibleIds].sort()).toEqual(["a", "b"]);
+    // limit 5: neither windowed tier reaches it → anytime (all three).
+    const t3 = pickCascadeTier(items, NOW, 5);
+    expect(t3.windowUsed).toBe("anytime");
+    expect([...t3.eligibleIds].sort()).toEqual(["a", "b", "c"]);
+  });
+
+  it("keys the cascade off recommendation recency (endorsed long ago, recommended yesterday → 2-week tier)", () => {
+    // A module endorsed 100 days ago (outside every window) but recommended
+    // yesterday: its cascade signal is the recommendation, so it qualifies in the
+    // 2-week tier — proof the recency rule is not endorsement-only.
+    const refreshed = mostRecentSignalOf(daysAgo(100), daysAgo(1));
+    const staleOnly = mostRecentSignalOf(daysAgo(100), null);
+    const items = [
+      { id: "refreshed", mostRecentSignal: refreshed! },
+      { id: "stale", mostRecentSignal: staleOnly! },
+    ];
+    const t = pickCascadeTier(items, NOW, 1);
+    expect(t.windowUsed).toBe("2_weeks");
+    expect([...t.eligibleIds]).toEqual(["refreshed"]); // stale one excluded at 2wk
+  });
+
+  it("buildHomepageResult attaches the static empty message iff the list is empty", () => {
+    expect(buildHomepageResult([], "anytime")).toEqual({
+      results: [],
+      windowUsed: "anytime" as HomepageWindow,
+      emptyStateMessage: HOMEPAGE_EMPTY_MESSAGE,
+    });
+    const nonEmpty = [{ module: { module_id: "m" } } as unknown as SearchResult];
+    const r = buildHomepageResult(nonEmpty, "2_weeks");
+    expect(r.emptyStateMessage).toBeNull();
+    expect(r.results).toBe(nonEmpty);
+  });
+});
+
+describe("Library — homepage DB wiring (robust to pre-existing data, Section 9.6)", () => {
   afterAll(async () => {
     await prisma.$disconnect();
   });
 
   const NOW = new Date("2026-08-01T00:00:00Z");
   const daysAgo = (n: number) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000);
+  // A limit large enough that the cap never evicts our modules regardless of how
+  // many other endorsed modules the shared DB already holds.
+  const NO_EVICTION = 1_000_000;
 
-  it("uses the 2-week tier when enough modules qualify, else widens to 2 months", async () => {
-    // limit=2 so the cascade is exercisable with a few modules.
-    const recent = await publishedModule({ endorsements: 2, signalDate: daysAgo(3), publicationDate: daysAgo(3) });
-    const monthOld = await publishedModule({ endorsements: 1, signalDate: daysAgo(30), publicationDate: daysAgo(30) });
-    await publishedModule({ endorsements: 1, signalDate: daysAgo(100), publicationDate: daysAgo(100) });
+  it("includes an endorsed, recently-signalled module and excludes an unendorsed one", async () => {
+    const endorsed = await publishedModule({ endorsements: 1, signalDate: daysAgo(1), publicationDate: daysAgo(1) });
+    const unendorsed = await publishedModule({ endorsements: 0, publicationDate: daysAgo(1) });
 
-    const res = await homepageModules(NOW, 2);
-    // 2-week pool has only `recent` (1 < 2) → widen to 2 months, which has 2.
-    expect(res.windowUsed).toBe("2_months");
-    expect(ids(res.results).sort()).toEqual([recent.module.module_id, monthOld.module.module_id].sort());
-    expect(res.emptyStateMessage).toBeNull();
+    const listed = ids((await homepageModules(NOW, NO_EVICTION)).results);
+    expect(listed).toContain(endorsed.module.module_id); // in the public section
+    expect(listed).not.toContain(unendorsed.module.module_id); // not promoted
   });
 
-  it("uses the 2-week tier directly when enough recent modules qualify", async () => {
-    const a = await publishedModule({ endorsements: 1, signalDate: daysAgo(2), publicationDate: daysAgo(2) });
-    const b = await publishedModule({ endorsements: 1, signalDate: daysAgo(5), publicationDate: daysAgo(5) });
-    await publishedModule({ endorsements: 1, signalDate: daysAgo(90), publicationDate: daysAgo(90) }); // old, excluded
-
-    const res = await homepageModules(NOW, 2);
-    expect(res.windowUsed).toBe("2_weeks");
-    expect(ids(res.results).sort()).toEqual([a.module.module_id, b.module.module_id].sort());
+  it("surfaces a module endorsed long ago but recommended yesterday (recommendation refreshes recency, end to end)", async () => {
+    // Endorsed 100 days ago (outside 2wk AND 2mo), recommended yesterday.
+    const m = await publishedModule({
+      endorsements: 1,
+      recommendations: 1,
+      endorseDate: daysAgo(100),
+      recDate: daysAgo(1),
+      publicationDate: daysAgo(100),
+    });
+    // Its endorsement alone would fall only in the anytime tier; the recommendation
+    // pulls it into the 2-week window. Assert it is eligible in a 2-week-only view.
+    // (Using a narrow computation robust to other data: the module must appear when
+    // the homepage is asked with a limit small enough that the 2-week tier is used
+    // globally is NOT guaranteed — so instead we assert membership, which holds in
+    // any tier ≥ its signal, and rely on the pure test above for the tier proof.)
+    const listed = ids((await homepageModules(NOW, NO_EVICTION)).results);
+    expect(listed).toContain(m.module.module_id);
   });
 
-  it("falls through to the anytime tier when nothing is recent", async () => {
-    const old1 = await publishedModule({ endorsements: 1, signalDate: daysAgo(200), publicationDate: daysAgo(200) });
-    const res = await homepageModules(NOW, 2);
-    expect(res.windowUsed).toBe("anytime");
-    expect(ids(res.results)).toEqual([old1.module.module_id]);
-  });
-
-  it("excludes unendorsed (non-public-section) modules and ranks by weighted approval", async () => {
+  it("ranks a higher-weighted-approval module ahead of a lower one (relative order is data-independent)", async () => {
     const strong = await publishedModule({ endorsements: 3, attestation: "wholly_human", signalDate: daysAgo(1), publicationDate: daysAgo(1) }); // 90
     const weak = await publishedModule({ endorsements: 1, attestation: "wholly_human", signalDate: daysAgo(1), publicationDate: daysAgo(1) }); // 30
-    const unendorsed = await publishedModule({ endorsements: 0, signalDate: daysAgo(1), publicationDate: daysAgo(1) });
 
-    const res = await homepageModules(NOW, 20);
-    const listed = ids(res.results);
-    expect(listed).not.toContain(unendorsed.module.module_id);
-    expect(listed).toEqual([strong.module.module_id, weak.module.module_id]); // strong ranks first
-  });
-
-  it("renders the static empty-state message when nothing qualifies", async () => {
-    // Clean slate (beforeEach wiped signals); create only an UNENDORSED module —
-    // it is not in the public section, so the homepage has nothing to show.
-    await publishedModule({ endorsements: 0, publicationDate: daysAgo(1) });
-    const res = await homepageModules(NOW, 20);
-    expect(res.results.length).toBe(0);
-    expect(res.emptyStateMessage).toBe(HOMEPAGE_EMPTY_MESSAGE);
+    const listed = ids((await homepageModules(NOW, NO_EVICTION)).results);
+    expect(listed.indexOf(strong.module.module_id)).toBeLessThan(listed.indexOf(weak.module.module_id));
   });
 });
 

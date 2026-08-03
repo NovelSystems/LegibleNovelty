@@ -218,10 +218,19 @@ confirmed; changing them is a decision, not a bug:
   made `grade_range` free-text/non-sortable; the Search sub-stage now needs to filter on it, so it
   does a case-insensitive `contains` match. Worth revisiting whether that original non-sortable
   decision should change now that filtering against the same field is a stated requirement.
-- **AI-attestation multiplier for AI Pipeline / null attestation is 1× (inference).** The doc gives
-  10×/2× for the two live tiers and "1×" for the deferred AI Pipeline tier; a NULL attestation is
-  undefined. Both are treated as the neutral 1× (no boost) — the safe, non-advantaging default. Adjust
-  in `lib/search.ts:ATTESTATION_MULTIPLIER` if a different call is made.
+- **AI-attestation multiplier for AI Pipeline / null attestation is 1×.** The doc gives 10×/2× for the
+  two live tiers and "1×" for the deferred AI Pipeline tier; a NULL attestation is undefined. Both are
+  treated as the neutral 1× (no boost). Adjust in `lib/search.ts:ATTESTATION_MULTIPLIER` if a different
+  call is made.
+- **GAP — module submission does not enforce the AI-attestation declaration.** Section 9.4 says "a
+  Module Author must declare the generation profile ... before the system accepts it", but
+  `ContextualizedModule.ai_attestation` is nullable and neither `submitForReview` nor `publishModule`
+  (Module Editor) requires it to be set — so a published module can genuinely reach ranking with no
+  attestation. This is a Module Editor enforcement gap, surfaced (not papered over) by the ranking
+  multiplier's null handling above; ranking treats the missing declaration as the neutral 1× floor so
+  an undeclared module can't gain the multiplier, but that is a safe default, not a fix for the missing
+  enforcement. Closing it (require attestation at submit/publish, and decide whether existing null rows
+  need backfill) is a Module Editor change, left for confirmation rather than made here unprompted.
 - **`context_tag` / `download_count` / `passing_completion_count` are retroactive `ContextualizedModule`
   additions** the Search sub-stage makes, not in Module Editor's original field list — same category as
   Seed Editor's `language`/`published_at` additions. `download_count` and `passing_completion_count`

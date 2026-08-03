@@ -23,18 +23,24 @@ export type SortMode =
 export const DEFAULT_SORT: SortMode = "weighted_approval";
 
 // Section 9.4's multiplier table. The two v1 tiers (10× / 2×) are live; AI
-// Pipeline is designed to slot in at 1× when the authoring wizard ships without
-// renumbering. INFERENCE (flagged): the doc gives no multiplier for AI Pipeline
-// beyond "1×" nor for a NULL attestation (a published module should always carry
-// one, but the column is nullable). Both are treated as 1× here — no boost, the
-// neutral floor — which is the safe, non-advantaging default and the value the
-// doc already assigns AI Pipeline. Adjust here if a different call is made.
+// Pipeline slots in at 1× when the authoring wizard ships (the doc's own value),
+// without renumbering.
 export const ATTESTATION_MULTIPLIER: Record<AiAttestation, number> = {
   wholly_human: 10,
   ai_assisted_manual_flair: 2,
   ai_pipeline: 1,
 };
 
+// The NULL case is NOT hypothetical: `ContextualizedModule.ai_attestation` is
+// nullable AND neither submitForReview nor publishModule enforces that it is set,
+// so a published module can genuinely reach ranking with no attestation. Section
+// 9.4 ("a Module Author must declare the generation profile ... before the system
+// accepts it") assumes submission enforces the declaration; it currently does
+// not. FLAGGED as a Module Editor gap (see the delivery summary) — not silently
+// papered over. Ranking treats a missing attestation as the neutral 1× floor (no
+// boost, no advantage) so an undeclared module cannot benefit from the multiplier;
+// that is the safe default while the enforcement gap stands, not a substitute for
+// closing it.
 export function attestationMultiplier(attestation: AiAttestation | null): number {
   return attestation == null ? 1 : ATTESTATION_MULTIPLIER[attestation];
 }

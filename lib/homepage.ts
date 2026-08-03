@@ -40,7 +40,66 @@ const CASCADE: { label: HomepageWindow; windowMs: number | null }[] = [
   { label: "anytime", windowMs: null },
 ];
 
+// --- Pure decomposition (no DB) — the testable core of the homepage list ------
+//
+// The cascade-tier selection, the two-signal recency rule, and the empty-state
+// mapping are all pure functions so they can be tested deterministically on
+// synthetic inputs, with no dependence on shared-table state or test execution
+// order. homepageModules (below) is only the DB wiring around them.
+
+// The recency signal that drives the cascade is the MORE RECENT of a module's
+// latest endorsement and its latest recommendation (Section 9.6: "most recent
+// endorsement OR recommendation"). A recommendation therefore refreshes recency
+// independently of how old the endorsement is — a module endorsed months ago but
+// recommended yesterday is "recent". Returns null only if neither signal exists.
+export function mostRecentSignalOf(
+  latestEndorsement: Date | null,
+  latestRecommendation: Date | null,
+): Date | null {
+  if (latestEndorsement && latestRecommendation) {
+    return latestEndorsement >= latestRecommendation ? latestEndorsement : latestRecommendation;
+  }
+  return latestEndorsement ?? latestRecommendation;
+}
+
+// The cascading eligibility window (Section 9.6). Widens 2 weeks → 2 months →
+// anytime, stopping at the first tier where at least `limit` items qualify; the
+// terminal `anytime` tier is always accepted no matter how few qualify. Pure:
+// takes the items' most-recent signals and returns the chosen tier plus the set
+// of eligible ids.
+export function pickCascadeTier(
+  items: { id: string; mostRecentSignal: Date }[],
+  now: Date,
+  limit: number,
+): { windowUsed: HomepageWindow; eligibleIds: Set<string> } {
+  for (const tier of CASCADE) {
+    const cutoff = tier.windowMs == null ? null : new Date(now.getTime() - tier.windowMs);
+    const pool = cutoff ? items.filter((i) => i.mostRecentSignal >= cutoff) : items;
+    if (pool.length >= limit || tier.windowMs == null) {
+      return { windowUsed: tier.label, eligibleIds: new Set(pool.map((i) => i.id)) };
+    }
+  }
+  // Unreachable — the `anytime` tier always returns — but keeps the type total.
+  return { windowUsed: "anytime", eligibleIds: new Set(items.map((i) => i.id)) };
+}
+
+// Assemble the final result, attaching the static empty-state message iff the
+// list came back empty (Section 9.6: one message, no branching on the cause).
+export function buildHomepageResult(
+  results: SearchResult[],
+  windowUsed: HomepageWindow,
+): HomepageResult {
+  return {
+    results,
+    windowUsed,
+    emptyStateMessage: results.length === 0 ? HOMEPAGE_EMPTY_MESSAGE : null,
+  };
+}
+
+// --- DB wiring ----------------------------------------------------------------
+
 interface Candidate {
+  id: string;
   result: SearchResult;
   mostRecentSignal: Date; // max(latest endorsement, latest recommendation)
 }
@@ -59,9 +118,7 @@ export async function homepageModules(
   const modules = await prisma.contextualizedModule.findMany({
     where: { status: "published" },
   });
-  if (modules.length === 0) {
-    return { results: [], windowUsed: "anytime", emptyStateMessage: HOMEPAGE_EMPTY_MESSAGE };
-  }
+  if (modules.length === 0) return buildHomepageResult([], "anytime");
 
   const { endorsements, recommendations } = await loadApprovalInputs(modules);
   const seedIds = [...new Set(modules.map((m) => m.primary_seed_id))];
@@ -90,11 +147,13 @@ export async function homepageModules(
     if (e < 1) continue; // not in the public section — never on the homepage
     const r = recommendations.get(module.module_id) ?? 0;
 
-    const latestEndorse = endorseMaxMap.get(module.primary_seed_id) ?? null;
-    const latestRec = recMaxMap.get(module.module_id) ?? null;
-    const times = [latestEndorse, latestRec].filter((d): d is Date => d != null);
-    if (times.length === 0) continue; // defensive; an endorsed module always has one
-    const mostRecentSignal = new Date(Math.max(...times.map((d) => d.getTime())));
+    // The cascade signal is the more recent of the two signal types (not
+    // endorsement alone) — see mostRecentSignalOf.
+    const mostRecentSignal = mostRecentSignalOf(
+      endorseMaxMap.get(module.primary_seed_id) ?? null,
+      recMaxMap.get(module.module_id) ?? null,
+    );
+    if (!mostRecentSignal) continue; // defensive; an endorsed module always has one
 
     const score = scoreModule("weighted_approval", {
       endorsements: e,
@@ -105,6 +164,7 @@ export async function homepageModules(
       publicationDate: module.publication_date,
     });
     candidates.push({
+      id: module.module_id,
       mostRecentSignal,
       result: {
         module,
@@ -117,29 +177,16 @@ export async function homepageModules(
     });
   }
 
-  // Cascade: widen the window until at least HOMEPAGE_LIMIT qualify, or the
-  // terminal `anytime` tier is reached (used no matter how few qualify).
-  let chosen: Candidate[] = [];
-  let windowUsed: HomepageWindow = "anytime";
-  for (const tier of CASCADE) {
-    const cutoff = tier.windowMs == null ? null : new Date(now.getTime() - tier.windowMs);
-    const pool = cutoff
-      ? candidates.filter((c) => c.mostRecentSignal >= cutoff)
-      : candidates;
-    if (pool.length >= limit || tier.windowMs == null) {
-      chosen = pool;
-      windowUsed = tier.label;
-      break;
-    }
-  }
+  const { windowUsed, eligibleIds } = pickCascadeTier(
+    candidates.map((c) => ({ id: c.id, mostRecentSignal: c.mostRecentSignal })),
+    now,
+    limit,
+  );
 
   // Rank the eligible pool by Weighted Approval (identical ordering rule as
   // search) and cap at the limit.
-  const results = rankResults(chosen.map((c) => c.result)).slice(0, limit);
+  const eligible = candidates.filter((c) => eligibleIds.has(c.id)).map((c) => c.result);
+  const results = rankResults(eligible).slice(0, limit);
 
-  return {
-    results,
-    windowUsed,
-    emptyStateMessage: results.length === 0 ? HOMEPAGE_EMPTY_MESSAGE : null,
-  };
+  return buildHomepageResult(results, windowUsed);
 }
