@@ -232,6 +232,9 @@ model Account {
   lesson_plan_assignments      LessonPlanAssignment[]    @relation("LessonPlanAssigner")
   lesson_plan_reports_filed    LessonPlanReport[]        @relation("LessonPlanReportReporter")
   lesson_plan_reports_resolved LessonPlanReport[]        @relation("LessonPlanReportResolver")
+  // Library — Endorsement & Community Recommendation.
+  endorsements_made            Endorsement[]             @relation("EndorserAccount")
+  recommendations_made         CommunityRecommendation[] @relation("RecommenderAccount")
 
   // email_hash and display_name_hash are the two indexed lookup columns the
   // brief requires (reclaim / reuse-blocking hit them on every signup).
@@ -592,6 +595,7 @@ model LearningSeed {
   modules         ContextualizedModule[] // Modules whose primary seed is this seed.
   chain_edges_out SeedChain[]            @relation("ChainFrom")
   chain_edges_in  SeedChain[]            @relation("ChainTo")
+  endorsements    Endorsement[] // Library: per-seed VE endorsements.
 
   @@index([architect_account_id])
   @@index([topic_id])
@@ -905,6 +909,12 @@ model ContextualizedModule {
   // warning trigger and line-count delta consumption are Library's.
   last_edited_at DateTime?
 
+  // Library idempotency latch: the ESS +5 "first endorser" reward (paid when the
+  // module reaches 10 Community Recommendations, Section 9-linked Standing Score
+  // trigger) fires exactly once per module. Set true when paid so a toggle-driven
+  // re-cross of the 10-recommendation threshold never double-pays.
+  ess_first_endorser_rewarded Boolean @default(false)
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
@@ -913,7 +923,9 @@ model ContextualizedModule {
   review_decisions    ModuleReviewDecision[]
   appeals             ModuleReviewAppeal[]
   // Live (unpinned) references from lesson-plan playlists (Lesson Planner).
-  lesson_plan_entries LessonPlanModule[]     @relation("LessonPlanModuleRef")
+  lesson_plan_entries LessonPlanModule[]        @relation("LessonPlanModuleRef")
+  // Library: community recommendations (module-level, eligibility-gated).
+  recommendations     CommunityRecommendation[]
 
   @@index([author_account_id])
   @@index([primary_seed_id])
@@ -1137,4 +1149,82 @@ model LessonPlanReport {
 enum LessonPlanReportStatus {
   pending
   resolved
+}
+
+// ===========================================================================
+// Library — Endorsement & Community Recommendation (first Library sub-stage;
+// master design Sections 9.1–9.2). These are the two core "trust actions" the
+// rest of the platform's search/ranking/visibility/Standing-Score wiring has
+// been forward-built to consume. Both are ADDITIVE-ONLY binary toggles — there
+// is deliberately no reject/downvote counterpart (Section 9.1: the only
+// rejection path for published content is moderation, Section 10.4).
+// ===========================================================================
+
+// Endorsement (Section 9.1) — PER-SEED, not per-module. A module's primary seed
+// and each secondary seed carry independent endorsement state, so this row keys
+// on `seed_id`, never `module_id`. Only a Verified Educator may create one, and
+// that `ve_status = true` check is made LIVE at action time in lib/endorsement.ts
+// (not a cached column here).
+//
+// TOGGLE = HARD DELETE: clicking again removes the endorsement. Unlike
+// StandingScoreEvent's append-only infraction log, there is no stated need to
+// retain a removed endorsement's history, so a removed endorsement leaves no
+// row — a plain unique constraint over (seed, endorser) enforces "at most one
+// live endorsement per VE per seed" and makes the toggle a create/delete pair.
+//
+// FLAGGED TENSION (LNC): master design Section 4.3 grants LNC-holders "the same
+// functional endorsement ability" as VEs, but this brief's Task 1 and its
+// acceptance criteria scope endorsement creation to `ve_status = true`
+// specifically. LNC (Certification Center) is not built yet — nothing sets
+// `lnc_status` — so the live check is ve_status-only for now; widening it to
+// `ve_status || lnc_status` is the one-line change to make when LNC ships. See
+// the delivery summary.
+model Endorsement {
+  endorsement_id String @id @default(uuid())
+
+  seed_id String
+  seed    LearningSeed @relation(fields: [seed_id], references: [seed_id])
+
+  // The endorsing VE. Held ve_status at creation time (checked in application
+  // logic); the FK is to the permanent account, not a status snapshot.
+  endorser_account_id String
+  endorser            Account @relation("EndorserAccount", fields: [endorser_account_id], references: [account_id])
+
+  created_at DateTime @default(now())
+
+  // One live endorsement per VE per seed; the toggle-off is a hard delete of
+  // this row, so re-endorsing is a fresh insert with a new created_at.
+  @@unique([seed_id, endorser_account_id])
+  @@index([seed_id])
+  @@index([endorser_account_id])
+}
+
+// Community Recommendation (Section 9.2) — GLOBAL to the module as a whole, not
+// per-seed. Binary toggle (hard delete on click-again, same as Endorsement).
+// The recommender must pass the shared eligibility gate (7-day account age +
+// completed profile, Section 9.5) — enforced in lib/endorsement.ts via the
+// single shared lib/eligibility.ts function that comments and commission-support
+// will reuse.
+model CommunityRecommendation {
+  recommendation_id String @id @default(uuid())
+
+  module_id String
+  module    ContextualizedModule @relation(fields: [module_id], references: [module_id])
+
+  recommender_account_id String
+  recommender            Account @relation("RecommenderAccount", fields: [recommender_account_id], references: [account_id])
+
+  // The module version active when this recommendation was made (snapshot of
+  // ContextualizedModule.version), mirroring ModuleReport.module_version. Drives
+  // the white (current-version) / grey (sum of prior versions) count split
+  // (Module Editor Task 2). Recommendations PERSIST across version changes; the
+  // split is purely informational and sorting always uses the combined total.
+  module_version Int
+
+  created_at DateTime @default(now())
+
+  // One live recommendation per account per module; toggle-off hard-deletes.
+  @@unique([module_id, recommender_account_id])
+  @@index([module_id])
+  @@index([recommender_account_id])
 }

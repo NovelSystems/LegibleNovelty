@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import type { CitedClause, Prisma } from "@prisma/client";
 import { REPORT_DAILY_CAP, combinedReportsTodayCount, overReportCap } from "@/lib/report-quota";
 import { applyStandingScoreDeltaWithin } from "@/lib/standing-scores";
+import { ESS_ENDORSED_MODULE_REJECTED, firstEndorserOfPrimarySeed } from "@/lib/endorsement";
 
 // Report-driven takedown + content-governance review for modules (Module Editor
 // Tasks 4-5). The report → Standing Score wiring MIRRORS SeedReport's pattern
@@ -69,6 +70,51 @@ async function applyAuthorDssTierWithin(
       // unclassified). Delta is 0 in both the retain and unclassified cases.
       delta: args.decision === "reject" && args.severity ? DSS_TIER[args.severity] : 0,
       eventType,
+      moderatorAccountId: args.moderatorAccountId,
+      explanation: args.explanation,
+    },
+    now,
+  );
+}
+
+// ESS -5 on rejection of a live, ENDORSED module (Library Task 6 — the one ESS
+// trigger Module Editor's existing Standing Score wiring didn't cover: the
+// report/takedown system already applies DSS to the author and CSS to the
+// reporter, but never touched ESS). The penalty targets the FIRST endorser of
+// the module's PRIMARY seed specifically — the same "who was first" identity the
+// +5 reward uses (firstEndorserOfPrimarySeed), because the primary seed is what
+// educator endorsement actually vouches for.
+//
+// INFERENCE, flagged in the delivery summary: when a module has multiple endorsed
+// seeds (primary + secondaries) endorsed by different VEs, this penalizes ONLY
+// the primary seed's first endorser, not every endorsing VE. If a broader
+// interpretation was intended, this is the single call to widen.
+//
+// Guarded by (a) a first endorser existing at all — an unendorsed module carries
+// no endorser to penalize — and (b) the module having actually been published
+// (publication_date set), since the trigger is a "live, endorsed" module being
+// rejected AFTER publication, not a never-published draft. Composes inside the
+// caller's transaction so it lands atomically with the DSS/CSS consequences.
+async function applyFirstEndorserRejectionEssWithin(
+  tx: Prisma.TransactionClient,
+  args: {
+    moduleId: string;
+    publicationDate: Date | null;
+    moderatorAccountId: string;
+    explanation: string;
+  },
+  now: Date,
+) {
+  if (!args.publicationDate) return; // never live → no post-publication penalty
+  const firstEndorserId = await firstEndorserOfPrimarySeed(args.moduleId, tx);
+  if (!firstEndorserId) return; // unendorsed → nobody to penalize
+  await applyStandingScoreDeltaWithin(
+    tx,
+    {
+      accountId: firstEndorserId,
+      scoreType: "ESS",
+      delta: ESS_ENDORSED_MODULE_REJECTED,
+      eventType: "ess_endorsed_module_rejected",
       moderatorAccountId: args.moderatorAccountId,
       explanation: args.explanation,
     },
@@ -222,6 +268,18 @@ export async function moderatorReviewModule(
     );
 
     if (args.decision === "reject") {
+      // Library Task 6: ESS -5 to the primary seed's first endorser when a live,
+      // endorsed module is rejected on human review.
+      await applyFirstEndorserRejectionEssWithin(
+        tx,
+        {
+          moduleId: args.moduleId,
+          publicationDate: module.publication_date,
+          moderatorAccountId: args.moderatorAccountId,
+          explanation: args.rationale,
+        },
+        now,
+      );
       // Rejected → taken down (removed from public, in moderation hold).
       await tx.contextualizedModule.update({
         where: { module_id: args.moduleId },
@@ -283,6 +341,19 @@ export async function moderatorManualTakedown(
         authorAccountId: module.author_account_id,
         decision: "reject", // a manual takedown is always a rejection
         severity: opts.severity,
+        moderatorAccountId,
+        explanation: rationale,
+      },
+      now,
+    );
+    // Library Task 6: same ESS -5 to the primary seed's first endorser as the
+    // report-rejection path — a manual takedown of a live, endorsed module is
+    // still an endorsed module rejected on human review.
+    await applyFirstEndorserRejectionEssWithin(
+      tx,
+      {
+        moduleId,
+        publicationDate: module.publication_date,
         moderatorAccountId,
         explanation: rationale,
       },

@@ -14,8 +14,11 @@ anchored to a concrete objective underneath.
 
 > **Status:** early build. The design is fully resolved at the specification level. The code
 > covers **Stage 0 and 1, all three Workshop sub-stages (Seed Editor, Module Editor, Lesson
-> Planner), and the cross-cutting Standing Scores system** — all on a single unmerged branch,
-> much of it wired against stubbed references that stay inert until deferred subsystems land. See
+> Planner), the cross-cutting Standing Scores system, and the first Library sub-stage (Endorsement
+> & Community Recommendation)** — all on a single unmerged branch. The Library sub-stage closes
+> more forward-built stubs than any prior one: it is what finally sets
+> `Account.first_seed_endorsement_received`, wires the previously-dormant endorsement/recommendation
+> Standing Score triggers, and resolves the module "public section" visibility question. See
 > [Build status](#build-status) for exactly what exists, what's deferred, and what's still
 > unsettled.
 
@@ -98,8 +101,19 @@ checks](#running-the-checks)). All of it lives on a single unmerged branch — s
   sub-stage.** One shared `StandingScore` table (type discriminator, decimal value, lazy read-time
   weekly drift, a 0-lock latch, restoration) plus an append-only `StandingScoreEvent` record. It
   spans subsystems: DSS gates Seed/Module authoring, CSS drives report outcomes, ESS governs VE
-  standing. Many of its triggers are built but **unwired**, waiting on deferred subsystems (see
-  below). → [`docs/briefs/StandingScores.md`](./docs/briefs/StandingScores.md)
+  standing. Its report/takedown triggers were wired at Module Editor; its **endorsement- and
+  recommendation-driven** triggers stayed unwired until the Library sub-stage below activated them.
+  → [`docs/briefs/StandingScores.md`](./docs/briefs/StandingScores.md)
+- ✅ **Library — Endorsement & Community Recommendation** _(first Library sub-stage)_. The per-seed
+  VE-only `Endorsement` and per-module eligibility-gated `CommunityRecommendation` models (both
+  additive-only binary toggles, hard-delete on toggle-off), the single shared 7-day/completed-profile
+  eligibility gate (`lib/eligibility.ts`, reused by comments and commission-support later), and the
+  wiring of every stub left waiting on it: `Account.first_seed_endorsement_received` (and thus the
+  Seed Editor publish-quota transition), the endorsing-VE placement flag routing through the existing
+  `SeedDraftComment`, the white/grey cross-version count split, the "edited under you" warning, the
+  first-endorsement "public section" promotion, and the DSS `+5/+1/+0.1` and ESS `+5/-5` Standing
+  Score triggers (reusing the existing helpers).
+  → [`docs/briefs/Library_EndorsementRecommendation.md`](./docs/briefs/Library_EndorsementRecommendation.md)
 
 ### Branch and PR state
 
@@ -114,13 +128,11 @@ Pulled from each brief's "Explicitly deferred" section. These aren't just unbuil
 one has already-built code pointing at it through a stub or soft reference, so it's load-bearing for
 things that look done:
 
-- **Library — Endorsement.** Module Editor's under-18 endorsement visibility gate, the "Seed
-  Architect" earned title, and DSS/ESS's endorsement-driven payouts are all built against
-  `Account.first_seed_endorsement_received` (a real column **nothing currently sets** — Endorsement
-  will).
-- **Library — Community Recommendation.** DSS's `+0.1`-per-recommendation trigger and ESS's
-  "+5, first endorser at 10 recommendations" trigger have schema support but no source of
-  recommendation events until this exists.
+- **Library — Sort Modes / Filters / Homepage Module List / Quick Search** (Sections 9.3–9.7). These
+  consume the Endorsement/Recommendation data the first Library sub-stage now produces, but are a
+  different kind of build (query/ranking/UI, not the core trust actions). Next Library sub-stage. The
+  endorsement-status binary, the combined-count total, and the `CommunityRecommendation.module_version`
+  snapshot they will rank against all exist now.
 - **Library — Progress Archive + Quiz/Test/Scoring.** The Lesson Planner tracking dashboard and the
   completion-submission prompt run entirely against a **stubbed completion signal**; the real
   per-learner completion and score data comes from here (Sections 7.4–7.5).
@@ -174,6 +186,19 @@ confirmed; changing them is a decision, not a bug:
   known user base and should be revisited before any wider launch.
 - **Template creation is built admin-only** (the narrower default); whether module authors can
   create their own reusable templates is unconfirmed.
+- **ESS -5 targets only the PRIMARY seed's first endorser** on rejection of an endorsed module — an
+  inference (the source doesn't disambiguate). If a module has multiple endorsed seeds by different
+  VEs, this penalizes only the primary seed's first endorser, consistent with the primary seed being
+  "what educator endorsement actually vouches for." Flag if endorsement of *any* seed should instead
+  trigger this penalty for that seed's specific endorser.
+- **"Completed profile" for the eligibility gate is defined as** verified email + at least one
+  interest domain + at least one language preference — an inference (Section 9.5 requires "a completed
+  profile" but never enumerates fields). It lives in one place (`lib/eligibility.ts:isProfileComplete`);
+  adjust there and every call site follows.
+- **Endorsement is scoped to `ve_status` only.** Section 4.3 grants LNC-holders the same endorsement
+  ability, but this brief (and its acceptance criteria) scope creation to `ve_status = true`, and
+  nothing sets `lnc_status` until Certification Center ships. Widening the live check to
+  `ve_status || lnc_status` is the one-line change to make then.
 
 **(b) Genuinely open questions with no current answer** — the schema tolerates them being unresolved,
 but nobody has decided:
@@ -188,10 +213,19 @@ but nobody has decided:
 - **`AwardCategory.eligibility_threshold`** type and value — genuinely unset pending platform
   activity data; left nullable rather than guessing a placeholder that could later read as real.
 - **Maximum page count per module** — none is built because none was specified.
-- **Whether unendorsed content is search-reachable only, or also passively surfaced** (browse,
-  recommendations, homepage) to adult accounts — Library's call, not assumed here.
 - **Whether VE endorsement should be scoped/revocable per module version** vs. platform-wide is
   marked "pending design decision" in the governance policy itself.
+- **Whether a secondary seed's endorsement should promote visibility** independently of the primary
+  seed — the Library sub-stage wires ONLY the primary-seed "public section" promotion (consistent with
+  the primary seed being the credential-bearing one); whether secondary-seed endorsement should do
+  anything visibility-wise is untouched.
+- **The "edited under you" line-count delta is not computable yet.** The warning fires correctly, but
+  its pull-request-style "N lines were modified" number is left null: a real delta needs a pre-edit
+  content/line snapshot, and Module Editor's authoring model persists only `last_edited_at` (a single
+  timestamp). Filling the number needs Module Editor to store an edit-diff baseline.
+- **Section 15 (PDF cover / print generation) is unassigned in the Section 22 subsystem map** — the
+  same category of gap as the earlier Taxonomy/Section-6 omission. It depends on the endorsement-status
+  binary this sub-stage produces but is its own downstream artifact concern; not resolved here.
 
 ### Cross-cutting patterns worth knowing before touching this code
 
@@ -320,8 +354,8 @@ up — rebuild with `docker compose down -v` and bring the environment back up.
 ├── auth.ts                  # Auth.js config: Account-backed adapter + database sessions
 ├── lib/                     # Service layer — one module per feature area (see below)
 ├── prisma/
-│   ├── schema.prisma        # Full schema: User Management + Seed/Module/Lesson + Standing Scores
-│   └── migrations/          # Committed migration history (8 migrations, additive)
+│   ├── schema.prisma        # Full schema: User Management + Seed/Module/Lesson + Standing Scores + Library
+│   └── migrations/          # Committed migration history (9 migrations, additive)
 ├── db/init/                 # Postgres init (shadow + test databases, UTF-8)
 ├── tests/                   # Vitest: auth, lifecycle, seeds, modules, lesson plans, governance, …
 ├── docs/                    # Authoritative specs: LN_Webapp_Design + per-stage briefs/
@@ -335,11 +369,12 @@ The `lib/` service layer has grown past Stage 1 to cover the merged sub-stages: 
 `lifecycle`, `connections`, `contact`, `verification`, `flags`, `badges`, `grade` (User
 Management); `seeds`, `curriculum`, `quota` (Seed Editor); `modules`, `module-authoring`,
 `module-reports`, `module-visibility` (Module Editor); `lesson-plans`, `lesson-plan-dashboard`,
-`lesson-plan-reports` (Lesson Planner); and the cross-cutting `standing-scores`, `report-quota`,
-`seed-reports`, and `pacific-time`. The single `prisma/schema.prisma` now holds every table for
-all of these; the schema names are the source of truth. Subsystems that are still deferred
-(Library, Communication, Commission Marketplace, Certification Center, Payments) bring their own
-tables when they land.
+`lesson-plan-reports` (Lesson Planner); `endorsement` and `eligibility` (Library — Endorsement &
+Community Recommendation); and the cross-cutting `standing-scores`, `report-quota`, `seed-reports`,
+and `pacific-time`. The single `prisma/schema.prisma` now holds every table for all of these; the
+schema names are the source of truth. Subsystems that are still deferred (the rest of Library,
+Communication, Commission Marketplace, Certification Center, Payments) bring their own tables when
+they land.
 
 ---
 
