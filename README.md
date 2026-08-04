@@ -14,8 +14,13 @@ anchored to a concrete objective underneath.
 
 > **Status:** early build. The design is fully resolved at the specification level. The code
 > covers **Stage 0 and 1, all three Workshop sub-stages (Seed Editor, Module Editor, Lesson
-> Planner), and the cross-cutting Standing Scores system** — all on a single unmerged branch,
-> much of it wired against stubbed references that stay inert until deferred subsystems land. See
+> Planner), the cross-cutting Standing Scores system, and the first two Library sub-stages
+> (Endorsement & Community Recommendation; Search, Ranking & Discovery)** — all on a single unmerged
+> branch. Endorsement & Recommendation closed more forward-built stubs than any prior sub-stage — it
+> is what finally sets `Account.first_seed_endorsement_received`, wires the previously-dormant
+> endorsement/recommendation Standing Score triggers, and resolves the module "public section"
+> visibility question. Search/Ranking/Discovery then builds the sort/filter/homepage/quick-search
+> layer that reads that trust data. See
 > [Build status](#build-status) for exactly what exists, what's deferred, and what's still
 > unsettled.
 
@@ -98,8 +103,30 @@ checks](#running-the-checks)). All of it lives on a single unmerged branch — s
   sub-stage.** One shared `StandingScore` table (type discriminator, decimal value, lazy read-time
   weekly drift, a 0-lock latch, restoration) plus an append-only `StandingScoreEvent` record. It
   spans subsystems: DSS gates Seed/Module authoring, CSS drives report outcomes, ESS governs VE
-  standing. Many of its triggers are built but **unwired**, waiting on deferred subsystems (see
-  below). → [`docs/briefs/StandingScores.md`](./docs/briefs/StandingScores.md)
+  standing. Its report/takedown triggers were wired at Module Editor; its **endorsement- and
+  recommendation-driven** triggers stayed unwired until the Library sub-stage below activated them.
+  → [`docs/briefs/StandingScores.md`](./docs/briefs/StandingScores.md)
+- ✅ **Library — Endorsement & Community Recommendation** _(first Library sub-stage)_. The per-seed
+  VE-or-LNC `Endorsement` and per-module eligibility-gated `CommunityRecommendation` models (both
+  additive-only binary toggles, hard-delete on toggle-off), the single shared 7-day/completed-profile
+  eligibility gate (`lib/eligibility.ts`, reused by comments and commission-support later), and the
+  wiring of every stub left waiting on it: `Account.first_seed_endorsement_received` (and thus the
+  Seed Editor publish-quota transition), the endorsing-VE placement flag routing through the existing
+  `SeedDraftComment`, the white/grey cross-version count split, the "edited under you" warning, the
+  first-endorsement "public section" promotion, and the DSS `+5/+1/+0.1` and ESS `+5/-5` Standing
+  Score triggers (reusing the existing helpers).
+  → [`docs/briefs/Library_EndorsementRecommendation.md`](./docs/briefs/Library_EndorsementRecommendation.md)
+- ✅ **Library — Search, Ranking & Discovery** _(second Library sub-stage)_. The five sort modes and
+  their formulas with the AI-attestation multiplier (`lib/search.ts`, reading the existing
+  `ai_attestation`), the full filter set (context tag, free-text-substring grade, subject/topic,
+  language, binary endorsement status, attestation tier — combining Context OR-within / AND-across),
+  the cascading-window homepage list (`lib/homepage.ts`: 2 weeks → 2 months → anytime, ranked by
+  Weighted Approval, up to 20, static empty state), and the Quick Search backend helpers (cascading
+  Subject→Topic, alphabetical Context options, "use my interests"). Adds `context_tag`,
+  `download_count`, and `passing_completion_count` to `ContextualizedModule`. Usage sorts are wired
+  and tested against stubbed download/completion counts (nothing populates them until PDF Generation
+  and Quiz/Scoring land).
+  → [`docs/briefs/Library_SearchRankingDiscovery.md`](./docs/briefs/Library_SearchRankingDiscovery.md)
 
 ### Branch and PR state
 
@@ -114,18 +141,17 @@ Pulled from each brief's "Explicitly deferred" section. These aren't just unbuil
 one has already-built code pointing at it through a stub or soft reference, so it's load-bearing for
 things that look done:
 
-- **Library — Endorsement.** Module Editor's under-18 endorsement visibility gate, the "Seed
-  Architect" earned title, and DSS/ESS's endorsement-driven payouts are all built against
-  `Account.first_seed_endorsement_received` (a real column **nothing currently sets** — Endorsement
-  will).
-- **Library — Community Recommendation.** DSS's `+0.1`-per-recommendation trigger and ESS's
-  "+5, first endorser at 10 recommendations" trigger have schema support but no source of
-  recommendation events until this exists.
-- **Library — Progress Archive + Quiz/Test/Scoring.** The Lesson Planner tracking dashboard and the
-  completion-submission prompt run entirely against a **stubbed completion signal**; the real
-  per-learner completion and score data comes from here (Sections 7.4–7.5).
-- **Library — browse / search / reading, ranking, sort, filters.** The public reading experience
-  itself; Module Editor exposes the FK targets it needs and builds none of the consuming logic.
+- **Library — Reading mechanics: Printable/Downloadable Format, Quiz/Test/Scoring, Progress Archive**
+  (Sections 7.3–7.5). Separate Library sub-stage. This is also the source of the two Usage-sort inputs
+  Search/Ranking already wired but cannot populate: `download_count` depends on PDF Generation
+  (Section 15) and `passing_completion_count` on Quiz/Scoring (Section 7.4). Both columns exist and
+  the Usage formulas read them; nothing increments them yet. The Lesson Planner tracking dashboard and
+  completion-submission prompt likewise run against a **stubbed completion signal** until this lands.
+- **Library — Named filter presets** (Section 9.5's own "deferred to the UI build phase," Section 18).
+  The one-click "Endorsed + Weighted Approval" style presets sit on top of the filter/sort primitives
+  Search/Ranking just built.
+- **PDF Generation (Section 15).** Feeds `download_count` and the printable artifact; Section 22 never
+  assigns it to a subsystem (still flagged). The endorsement-status binary it stamps on covers exists.
 - **Communication — `Post`/`Comment` (`thread_type`) model.** Stage 1's `TokenRequestThread` is a
   deliberate stopgap to be folded into this; CSS's comment-report outcome triggers wait on it.
 - **Communication — Big Questions interactive mechanic.** The read-only archive is Library's; the
@@ -174,6 +200,41 @@ confirmed; changing them is a decision, not a bug:
   known user base and should be revisited before any wider launch.
 - **Template creation is built admin-only** (the narrower default); whether module authors can
   create their own reusable templates is unconfirmed.
+- **ESS -5 targets only the PRIMARY seed's first endorser** on rejection of an endorsed module — an
+  inference (the source doesn't disambiguate). If a module has multiple endorsed seeds by different
+  VEs, this penalizes only the primary seed's first endorser, consistent with the primary seed being
+  "what educator endorsement actually vouches for." Flag if endorsement of *any* seed should instead
+  trigger this penalty for that seed's specific endorser.
+- **"Completed profile" for the eligibility gate is defined as** verified email + at least one
+  interest domain + at least one language preference — an inference (Section 9.5 requires "a completed
+  profile" but never enumerates fields). It lives in one place (`lib/eligibility.ts:isProfileComplete`);
+  adjust there and every call site follows.
+- **Endorsement eligibility is VE-or-LNC (resolved).** Section 9.1's prose said "only Verified
+  Educators," but Section 22's summary of the same section says "VE/LNC status specifically"; Section
+  22's broader reading is correct (Section 4.3 gives LNC-holders the same endorsement ability), so the
+  live check is `ve_status || lnc_status`. `lnc_status` has no source until Certification Center ships,
+  so the LNC path is currently unreachable but implemented and tested.
+- **Grade-level filter is a free-text SUBSTRING match, not a numeric range.** Seed Editor deliberately
+  made `grade_range` free-text/non-sortable; the Search sub-stage now needs to filter on it, so it
+  does a case-insensitive `contains` match. Worth revisiting whether that original non-sortable
+  decision should change now that filtering against the same field is a stated requirement.
+- **AI-attestation multiplier for AI Pipeline / null attestation is 1×.** The doc gives 10×/2× for the
+  two live tiers and "1×" for the deferred AI Pipeline tier; a NULL attestation is undefined. Both are
+  treated as the neutral 1× (no boost). Adjust in `lib/search.ts:ATTESTATION_MULTIPLIER` if a different
+  call is made.
+- **GAP — module submission does not enforce the AI-attestation declaration.** Section 9.4 says "a
+  Module Author must declare the generation profile ... before the system accepts it", but
+  `ContextualizedModule.ai_attestation` is nullable and neither `submitForReview` nor `publishModule`
+  (Module Editor) requires it to be set — so a published module can genuinely reach ranking with no
+  attestation. This is a Module Editor enforcement gap, surfaced (not papered over) by the ranking
+  multiplier's null handling above; ranking treats the missing declaration as the neutral 1× floor so
+  an undeclared module can't gain the multiplier, but that is a safe default, not a fix for the missing
+  enforcement. Closing it (require attestation at submit/publish, and decide whether existing null rows
+  need backfill) is a Module Editor change, left for confirmation rather than made here unprompted.
+- **`context_tag` / `download_count` / `passing_completion_count` are retroactive `ContextualizedModule`
+  additions** the Search sub-stage makes, not in Module Editor's original field list — same category as
+  Seed Editor's `language`/`published_at` additions. `download_count` and `passing_completion_count`
+  are populated by nothing yet (PDF Generation and Quiz/Scoring are unbuilt).
 
 **(b) Genuinely open questions with no current answer** — the schema tolerates them being unresolved,
 but nobody has decided:
@@ -188,10 +249,36 @@ but nobody has decided:
 - **`AwardCategory.eligibility_threshold`** type and value — genuinely unset pending platform
   activity data; left nullable rather than guessing a placeholder that could later read as real.
 - **Maximum page count per module** — none is built because none was specified.
-- **Whether unendorsed content is search-reachable only, or also passively surfaced** (browse,
-  recommendations, homepage) to adult accounts — Library's call, not assumed here.
 - **Whether VE endorsement should be scoped/revocable per module version** vs. platform-wide is
   marked "pending design decision" in the governance policy itself.
+- **Whether a secondary seed's endorsement should promote visibility** independently of the primary
+  seed — the Library sub-stage wires ONLY the primary-seed "public section" promotion (consistent with
+  the primary seed being the credential-bearing one); whether secondary-seed endorsement should do
+  anything visibility-wise is untouched.
+- **The "edited under you" delta is measured in ELEMENTS, not lines.** Module content is page/element
+  JSON with no "lines", so the warning quantifies change as the net `ModuleElement`-count delta since
+  the current version's publish (a new `ContextualizedModule.published_element_count` baseline set at
+  publish) — the structural analog of a line delta. Two honest limits, both from Module Editor
+  persisting no per-edit changelog: it is a NET count (pure in-place text edits, or equal add/remove
+  churn, read as 0), and the baseline is publish-time (change *on this version since it went live*,
+  surfaced alongside the within-the-hour recency trigger, not a strict trailing-60-minute window). A
+  character-level or true trailing-window delta would need an edit-diff baseline Module Editor does not
+  keep.
+- **Section 15 (PDF cover / print generation) is unassigned in the Section 22 subsystem map** — the
+  same category of gap as the earlier Taxonomy/Section-6 omission. It depends on the endorsement-status
+  binary this sub-stage produces but is its own downstream artifact concern; not resolved here.
+- **Homepage domain-diversity capping** (Section 9.6) — whether to cap consecutive modules from the
+  same Subject/Context on the highest-visibility page. The design doc leaves it explicitly undecided;
+  the Search sub-stage does not default it either way (the list ranks purely by Weighted Approval).
+- **Context listbox collapse behaviour** (Section 9.7) — the listbox is specified NOT to auto-collapse
+  on blur; what closes it (an explicit control, or staying open for the panel's lifetime) is undecided.
+  A frontend/UI concern, unresolved.
+- **"Use my interests" loading indicator** (Section 9.7) — whether a spinner shows between click and
+  result, or the fetch is assumed fast enough. Undecided; the backend helper (`useMyInterests`) is
+  agnostic to it.
+- **Usage sorts are unexercisable with real data** until PDF Generation (`download_count`) and
+  Quiz/Scoring (`passing_completion_count`) land. The formulas are built and tested against stubbed
+  counts; nothing populates the columns yet.
 
 ### Cross-cutting patterns worth knowing before touching this code
 
@@ -320,8 +407,8 @@ up — rebuild with `docker compose down -v` and bring the environment back up.
 ├── auth.ts                  # Auth.js config: Account-backed adapter + database sessions
 ├── lib/                     # Service layer — one module per feature area (see below)
 ├── prisma/
-│   ├── schema.prisma        # Full schema: User Management + Seed/Module/Lesson + Standing Scores
-│   └── migrations/          # Committed migration history (8 migrations, additive)
+│   ├── schema.prisma        # Full schema: User Management + Seed/Module/Lesson + Standing Scores + Library
+│   └── migrations/          # Committed migration history (11 migrations, additive)
 ├── db/init/                 # Postgres init (shadow + test databases, UTF-8)
 ├── tests/                   # Vitest: auth, lifecycle, seeds, modules, lesson plans, governance, …
 ├── docs/                    # Authoritative specs: LN_Webapp_Design + per-stage briefs/
@@ -335,11 +422,13 @@ The `lib/` service layer has grown past Stage 1 to cover the merged sub-stages: 
 `lifecycle`, `connections`, `contact`, `verification`, `flags`, `badges`, `grade` (User
 Management); `seeds`, `curriculum`, `quota` (Seed Editor); `modules`, `module-authoring`,
 `module-reports`, `module-visibility` (Module Editor); `lesson-plans`, `lesson-plan-dashboard`,
-`lesson-plan-reports` (Lesson Planner); and the cross-cutting `standing-scores`, `report-quota`,
-`seed-reports`, and `pacific-time`. The single `prisma/schema.prisma` now holds every table for
-all of these; the schema names are the source of truth. Subsystems that are still deferred
-(Library, Communication, Commission Marketplace, Certification Center, Payments) bring their own
-tables when they land.
+`lesson-plan-reports` (Lesson Planner); `endorsement` and `eligibility` (Library — Endorsement &
+Community Recommendation); `search` and `homepage` (Library — Search, Ranking & Discovery); and the
+cross-cutting `standing-scores`, `report-quota`, `seed-reports`, and `pacific-time`. The single
+`prisma/schema.prisma` now holds every table for all of these; the
+schema names are the source of truth. Subsystems that are still deferred (the rest of Library,
+Communication, Commission Marketplace, Certification Center, Payments) bring their own tables when
+they land.
 
 ---
 

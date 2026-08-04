@@ -268,6 +268,13 @@ export async function publishModule(moduleId: string, authorId: string, now: Dat
     }
   }
 
+  // Snapshot the element-count baseline for this newly-published version — the
+  // reference point Library's "edited under you" warning measures later edits
+  // against (element-count delta, the structural analog of a line-count delta).
+  const publishedElementCount = await prisma.moduleElement.count({
+    where: { page: { module_id: moduleId } },
+  });
+
   // Publish: increment the version (a distinct published release), stamp the
   // date, clear the seed-alignment arm, and RE-ARM takedown (the new version no
   // longer matches takedown_disarmed_version).
@@ -279,6 +286,7 @@ export async function publishModule(moduleId: string, authorId: string, now: Dat
       publication_date: now,
       seed_ref_changed: false,
       auto_taken_down: false,
+      published_element_count: publishedElementCount,
     },
   });
 }
