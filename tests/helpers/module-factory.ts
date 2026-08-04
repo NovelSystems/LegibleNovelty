@@ -32,7 +32,14 @@ export async function makeModuleWithText(
   plainText: string,
   now?: Date,
 ) {
-  const module = await createModule({ authorAccountId: authorId, primarySeedId }, now);
+  // Declare an attestation at creation so the module can be submitted for review
+  // (submission now requires ai_attestation, master design Section 9.4). Tests
+  // that care about a specific tier override it; the default has no effect on
+  // tests that never publish/rank.
+  const module = await createModule(
+    { authorAccountId: authorId, primarySeedId, aiAttestation: "wholly_human" },
+    now,
+  );
   const page = await addPage(module.module_id, 0);
   await createElement(page.page_id, {
     element_type: "text",

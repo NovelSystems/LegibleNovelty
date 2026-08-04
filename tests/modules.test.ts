@@ -6,7 +6,9 @@ import {
   publishModule,
   submitForReview,
   PublicationGateError,
+  ModuleError,
   setCommission,
+  setAiAttestation,
   addSecondarySeed,
 } from "@/lib/modules";
 import { updateElementContent } from "@/lib/module-authoring";
@@ -139,13 +141,34 @@ describe("Module Editor — lifecycle, DSS lock, publication gate", () => {
     const { seed } = await makePublishedPrimarySeed();
     const sec = await makePublishedPrimarySeed();
     const author = await makeAccount();
-    const module = await createModule({ authorAccountId: author.account_id, primarySeedId: seed.seed_id });
+    const module = await createModule({ authorAccountId: author.account_id, primarySeedId: seed.seed_id, aiAttestation: "wholly_human" });
     await addSecondarySeed(module.module_id, author.account_id, sec.seed.seed_id);
     await submitForReview(module.module_id, author.account_id);
     // After submission, no more add/remove.
     await expect(
       addSecondarySeed(module.module_id, author.account_id, sec.seed.seed_id),
     ).rejects.toThrow();
+  });
+
+  it("requires an AI-attestation declaration to submit for review, and succeeds once set", async () => {
+    const { seed } = await makePublishedPrimarySeed();
+    const author = await makeAccount();
+    // Created as a Draft with NO attestation — legitimately null while a Draft.
+    const module = await createModule({ authorAccountId: author.account_id, primarySeedId: seed.seed_id });
+    expect(module.ai_attestation).toBeNull();
+
+    // Submission is rejected while the declaration is missing.
+    await expect(submitForReview(module.module_id, author.account_id)).rejects.toBeInstanceOf(
+      ModuleError,
+    );
+    // Still a Draft — the transition did not happen.
+    const stillDraft = await prisma.contextualizedModule.findUniqueOrThrow({ where: { module_id: module.module_id } });
+    expect(stillDraft.status).toBe("draft");
+
+    // Once declared, submission succeeds.
+    await setAiAttestation(module.module_id, author.account_id, "ai_assisted_manual_flair");
+    const submitted = await submitForReview(module.module_id, author.account_id);
+    expect(submitted.status).toBe("pending_review");
   });
 
   it("keeps flair_tags and prepublication_review_report as inert, unused columns", async () => {
