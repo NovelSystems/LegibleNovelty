@@ -22,9 +22,8 @@ export type SortMode =
 
 export const DEFAULT_SORT: SortMode = "weighted_approval";
 
-// Section 9.4's multiplier table. The two v1 tiers (10× / 2×) are live; AI
-// Pipeline slots in at 1× when the authoring wizard ships (the doc's own value),
-// without renumbering.
+// Section 9.4's multiplier table. The two primary tiers (10× / 2×) are live; AI
+// Pipeline carries the doc's 1× value as the third, lowest tier.
 export const ATTESTATION_MULTIPLIER: Record<AiAttestation, number> = {
   wholly_human: 10,
   ai_assisted_manual_flair: 2,
