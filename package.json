@@ -34,7 +34,8 @@
       "brace-expansion@5": "^5.0.9",
       "js-yaml": "^4.3.1",
       "nanoid": "^3.3.17",
-      "nodemailer": "^9.0.1"
+      "nodemailer": "^9.0.1",
+      "vite": "^6.4.3"
     }
   },
   "devDependencies": {
@@ -52,6 +53,6 @@
     "prisma": "^6.2.1",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.19.1",
-    "vitest": "^2.1.8"
+    "vitest": "^3.2.7"
   }
 }
