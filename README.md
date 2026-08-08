@@ -216,19 +216,25 @@ confirmed; changing them is a decision, not a bug:
   made `grade_range` free-text/non-sortable; the Search sub-stage now needs to filter on it, so it
   does a case-insensitive `contains` match. Worth revisiting whether that original non-sortable
   decision should change now that filtering against the same field is a stated requirement.
-- **AI-attestation multiplier for AI Pipeline / null attestation is 1×.** The doc gives 10×/2× for the
-  two live tiers and "1×" for the deferred AI Pipeline tier; a NULL attestation is undefined. Both are
-  treated as the neutral 1× (no boost). Adjust in `lib/search.ts:ATTESTATION_MULTIPLIER` if a different
-  call is made.
-- **GAP — module submission does not enforce the AI-attestation declaration.** Section 9.4 says "a
-  Module Author must declare the generation profile ... before the system accepts it", but
-  `ContextualizedModule.ai_attestation` is nullable and neither `submitForReview` nor `publishModule`
-  (Module Editor) requires it to be set — so a published module can genuinely reach ranking with no
-  attestation. This is a Module Editor enforcement gap, surfaced (not papered over) by the ranking
-  multiplier's null handling above; ranking treats the missing declaration as the neutral 1× floor so
-  an undeclared module can't gain the multiplier, but that is a safe default, not a fix for the missing
-  enforcement. Closing it (require attestation at submit/publish, and decide whether existing null rows
-  need backfill) is a Module Editor change, left for confirmation rather than made here unprompted.
+- **AI-attestation multiplier for AI Pipeline is 1×.** The doc gives 10×/2× for the two live tiers and
+  "1×" for the deferred AI Pipeline tier. Adjust in `lib/search.ts:ATTESTATION_MULTIPLIER` if a
+  different call is made. (A NULL attestation also floors at 1× defensively, but it no longer reaches
+  ranking — see the resolved gap below.)
+- **RESOLVED — AI-attestation is now enforced at submission.** Section 9.4 requires a declaration
+  "before the system accepts it"; `submitForReview` (Module Editor) now rejects the draft →
+  pending-review transition when `ai_attestation` is null, and the
+  `20260803150000_backfill_null_ai_attestation` migration normalized any pre-enforcement
+  submitted/published rows to `ai_pipeline` (1×, the lowest multiplier — chosen because it exactly
+  matches the 1× the ranking code already applied to a null, so those rows gain no advantage; 2×/10×
+  would have handed them a boost). **The column stays nullable, deliberately:** a Draft legitimately
+  has no declaration until it reaches the submission gate, so `null` is the correct state for a Draft
+  and only for a Draft (Drafts are never ranked — search and homepage both filter `status =
+  published`). Making it `NOT NULL` would force a value at draft-creation, before the author has
+  declared, or require a fabricated default — so enforcement lives at the state transition, matching
+  how the branch gates other lifecycle requirements, not at the column. One caveat: `ai_pipeline`
+  permanently locks (`setAiAttestation` won't change away from it), so a backfilled legacy row can't
+  later be re-declared to its true tier; acceptable for the undeclared/dev rows this touches, flagged
+  in case real pre-enforcement content ever needs it.
 - **`context_tag` / `download_count` / `passing_completion_count` are retroactive `ContextualizedModule`
   additions** the Search sub-stage makes, not in Module Editor's original field list — same category as
   Seed Editor's `language`/`published_at` additions. `download_count` and `passing_completion_count`
@@ -405,7 +411,7 @@ up — rebuild with `docker compose down -v` and bring the environment back up.
 ├── lib/                     # Service layer — one module per feature area (see below)
 ├── prisma/
 │   ├── schema.prisma        # Full schema: User Management + Seed/Module/Lesson + Standing Scores + Library
-│   └── migrations/          # Committed migration history (11 migrations, additive)
+│   └── migrations/          # Committed migration history (12 migrations, additive + one data-fix)
 ├── db/init/                 # Postgres init (shadow + test databases, UTF-8)
 ├── tests/                   # Vitest: auth, lifecycle, seeds, modules, lesson plans, governance, …
 ├── docs/                    # Authoritative specs: LN_Webapp_Design + per-stage briefs/
