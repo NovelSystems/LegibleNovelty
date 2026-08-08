@@ -6,7 +6,9 @@ import {
   publishModule,
   submitForReview,
   PublicationGateError,
+  ModuleError,
   setCommission,
+  setAiAttestation,
   addSecondarySeed,
 } from "@/lib/modules";
 import { updateElementContent } from "@/lib/module-authoring";
@@ -139,13 +141,35 @@ describe("Module Editor — lifecycle, DSS lock, publication gate", () => {
     const { seed } = await makePublishedPrimarySeed();
     const sec = await makePublishedPrimarySeed();
     const author = await makeAccount();
-    const module = await createModule({ authorAccountId: author.account_id, primarySeedId: seed.seed_id });
+    const module = await createModule({ authorAccountId: author.account_id, primarySeedId: seed.seed_id, aiAttestation: "wholly_human" });
     await addSecondarySeed(module.module_id, author.account_id, sec.seed.seed_id);
     await submitForReview(module.module_id, author.account_id);
     // After submission, no more add/remove.
     await expect(
       addSecondarySeed(module.module_id, author.account_id, sec.seed.seed_id),
     ).rejects.toThrow();
+  });
+
+  it("rejects submission when ai_attestation is undeclared, and accepts it once declared (Section 9.4)", async () => {
+    const { seed } = await makePublishedPrimarySeed();
+    const author = await makeAccount();
+
+    // Rejection: a draft created without an attestation cannot leave draft.
+    const undeclared = await createModule({ authorAccountId: author.account_id, primarySeedId: seed.seed_id });
+    expect(undeclared.ai_attestation).toBeNull();
+    await expect(submitForReview(undeclared.module_id, author.account_id)).rejects.toBeInstanceOf(
+      ModuleError,
+    );
+    // The transition did not happen — still a draft.
+    const stillDraft = await prisma.contextualizedModule.findUniqueOrThrow({
+      where: { module_id: undeclared.module_id },
+    });
+    expect(stillDraft.status).toBe("draft");
+
+    // Success: declaring the attestation makes the same module submittable.
+    await setAiAttestation(undeclared.module_id, author.account_id, "wholly_human");
+    const submitted = await submitForReview(undeclared.module_id, author.account_id);
+    expect(submitted.status).toBe("pending_review");
   });
 
   it("keeps flair_tags and prepublication_review_report as inert, unused columns", async () => {

@@ -30,16 +30,14 @@ export const ATTESTATION_MULTIPLIER: Record<AiAttestation, number> = {
   ai_pipeline: 1,
 };
 
-// The NULL case is NOT hypothetical: `ContextualizedModule.ai_attestation` is
-// nullable AND neither submitForReview nor publishModule enforces that it is set,
-// so a published module can genuinely reach ranking with no attestation. Section
-// 9.4 ("a Module Author must declare the generation profile ... before the system
-// accepts it") assumes submission enforces the declaration; it currently does
-// not. FLAGGED as a Module Editor gap (see the delivery summary) — not silently
-// papered over. Ranking treats a missing attestation as the neutral 1× floor (no
-// boost, no advantage) so an undeclared module cannot benefit from the multiplier;
-// that is the safe default while the enforcement gap stands, not a substitute for
-// closing it.
+// `ContextualizedModule.ai_attestation` is nullable, but a published module can
+// no longer reach ranking with a null attestation: submitForReview now enforces
+// Section 9.4's declaration requirement at the draft→pending_review transition,
+// and a backfill migration set every pre-enforcement null row to the
+// least-advantageous tier (ai_pipeline, 1×). Null now occurs only on in-progress
+// drafts, which buildWhere's `status: "published"` filter excludes from ranking.
+// The 1× return below is therefore a defensive floor for a case ranking should
+// never see, not the load-bearing handler for an open enforcement gap.
 export function attestationMultiplier(attestation: AiAttestation | null): number {
   return attestation == null ? 1 : ATTESTATION_MULTIPLIER[attestation];
 }
