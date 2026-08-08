@@ -32,10 +32,9 @@ export async function makeModuleWithText(
   plainText: string,
   now?: Date,
 ) {
-  // Declare an attestation at creation so the module can be submitted for review
-  // (submission now requires ai_attestation, master design Section 9.4). Tests
-  // that care about a specific tier override it; the default has no effect on
-  // tests that never publish/rank.
+  // Default to a declared attestation so factory-built modules are submittable
+  // under the submitForReview enforcement. Tests that care about a specific tier
+  // (or the null-handling path) override ai_attestation directly after creation.
   const module = await createModule(
     { authorAccountId: authorId, primarySeedId, aiAttestation: "wholly_human" },
     now,

@@ -229,18 +229,13 @@ export async function submitForReview(moduleId: string, authorId: string, now: D
   if (module.status !== "draft") {
     throw new ModuleError("Only a draft can be submitted for review.");
   }
-  // The AI-attestation declaration is required at submission (master design
   // Section 9.4: "a Module Author must declare the generation profile ... before
-  // the system accepts it"). A Draft may legitimately carry a null attestation —
-  // it hasn't reached this gate yet — but the draft → pending-review transition is
-  // exactly where the declaration becomes mandatory, alongside the other
-  // submission-time requirements. Downstream ranking (Library search) and the
-  // endorsement Standing-Score payouts read this field, so it must be declared
-  // before content can accrue any of that.
+  // the system accepts it." This is the enforcement point. A draft may sit with a
+  // null attestation while it is being written (createModule allows it), but the
+  // declaration is mandatory to leave draft — so a module can never reach
+  // pending_review, and therefore never publish or rank, without one.
   if (module.ai_attestation == null) {
-    throw new ModuleError(
-      "An AI-attestation declaration is required before submitting a module for review.",
-    );
+    throw new ModuleError("An AI attestation must be declared before submitting for review.");
   }
   return prisma.contextualizedModule.update({
     where: { module_id: moduleId },

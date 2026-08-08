@@ -150,24 +150,25 @@ describe("Module Editor — lifecycle, DSS lock, publication gate", () => {
     ).rejects.toThrow();
   });
 
-  it("requires an AI-attestation declaration to submit for review, and succeeds once set", async () => {
+  it("rejects submission when ai_attestation is undeclared, and accepts it once declared (Section 9.4)", async () => {
     const { seed } = await makePublishedPrimarySeed();
     const author = await makeAccount();
-    // Created as a Draft with NO attestation — legitimately null while a Draft.
-    const module = await createModule({ authorAccountId: author.account_id, primarySeedId: seed.seed_id });
-    expect(module.ai_attestation).toBeNull();
 
-    // Submission is rejected while the declaration is missing.
-    await expect(submitForReview(module.module_id, author.account_id)).rejects.toBeInstanceOf(
+    // Rejection: a draft created without an attestation cannot leave draft.
+    const undeclared = await createModule({ authorAccountId: author.account_id, primarySeedId: seed.seed_id });
+    expect(undeclared.ai_attestation).toBeNull();
+    await expect(submitForReview(undeclared.module_id, author.account_id)).rejects.toBeInstanceOf(
       ModuleError,
     );
-    // Still a Draft — the transition did not happen.
-    const stillDraft = await prisma.contextualizedModule.findUniqueOrThrow({ where: { module_id: module.module_id } });
+    // The transition did not happen — still a draft.
+    const stillDraft = await prisma.contextualizedModule.findUniqueOrThrow({
+      where: { module_id: undeclared.module_id },
+    });
     expect(stillDraft.status).toBe("draft");
 
-    // Once declared, submission succeeds.
-    await setAiAttestation(module.module_id, author.account_id, "ai_assisted_manual_flair");
-    const submitted = await submitForReview(module.module_id, author.account_id);
+    // Success: declaring the attestation makes the same module submittable.
+    await setAiAttestation(undeclared.module_id, author.account_id, "wholly_human");
+    const submitted = await submitForReview(undeclared.module_id, author.account_id);
     expect(submitted.status).toBe("pending_review");
   });
 

@@ -30,14 +30,14 @@ export const ATTESTATION_MULTIPLIER: Record<AiAttestation, number> = {
   ai_pipeline: 1,
 };
 
-// The column stays nullable, but a NULL attestation no longer reaches ranking:
-// submission now enforces the declaration at the draft → pending-review gate
-// (lib/modules.ts submitForReview), and the backfill migration
-// (20260803150000_backfill_null_ai_attestation) normalized any pre-enforcement
-// submitted/published rows. NULL now means only "still a Draft" — and Drafts are
-// never ranked (search and the homepage both filter `status = published`). The 1×
-// fallback is therefore a defensive floor for a case that shouldn't occur in a
-// ranked context, not a workaround for a live gap.
+// `ContextualizedModule.ai_attestation` is nullable, but a published module can
+// no longer reach ranking with a null attestation: submitForReview now enforces
+// Section 9.4's declaration requirement at the draft→pending_review transition,
+// and a backfill migration set every pre-enforcement null row to the
+// least-advantageous tier (ai_pipeline, 1×). Null now occurs only on in-progress
+// drafts, which buildWhere's `status: "published"` filter excludes from ranking.
+// The 1× return below is therefore a defensive floor for a case ranking should
+// never see, not the load-bearing handler for an open enforcement gap.
 export function attestationMultiplier(attestation: AiAttestation | null): number {
   return attestation == null ? 1 : ATTESTATION_MULTIPLIER[attestation];
 }
