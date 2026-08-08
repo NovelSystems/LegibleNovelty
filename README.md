@@ -167,8 +167,6 @@ things that look done:
   Center's own dependency.
 - **DEF Arbitration (Phase 2).** Module Editor reserves a nullable `prepublication_review_report`
   column for the eventual report; the AI pre-publication review itself is compute-dependent Phase 2.
-- **AI authoring wizard.** Deferred pending an established contributor base and an unresolved pricing
-  model; Module Editor's `AiAttestation` lock rule exists in anticipation of it.
 - **Escalation panel staffing.** Module Editor builds the appeal **schema** (`ModuleReviewAppeal`,
   3+ distinct reviewers); the panel's actual staffing/recruitment is marked "pending Phase 1
   staffing decision" in the governance policy and is not built.
@@ -218,19 +216,25 @@ confirmed; changing them is a decision, not a bug:
   made `grade_range` free-text/non-sortable; the Search sub-stage now needs to filter on it, so it
   does a case-insensitive `contains` match. Worth revisiting whether that original non-sortable
   decision should change now that filtering against the same field is a stated requirement.
-- **AI-attestation multiplier for AI Pipeline / null attestation is 1×.** The doc gives 10×/2× for the
-  two live tiers and "1×" for the deferred AI Pipeline tier; a NULL attestation is undefined. Both are
-  treated as the neutral 1× (no boost). Adjust in `lib/search.ts:ATTESTATION_MULTIPLIER` if a different
-  call is made.
-- **GAP — module submission does not enforce the AI-attestation declaration.** Section 9.4 says "a
-  Module Author must declare the generation profile ... before the system accepts it", but
-  `ContextualizedModule.ai_attestation` is nullable and neither `submitForReview` nor `publishModule`
-  (Module Editor) requires it to be set — so a published module can genuinely reach ranking with no
-  attestation. This is a Module Editor enforcement gap, surfaced (not papered over) by the ranking
-  multiplier's null handling above; ranking treats the missing declaration as the neutral 1× floor so
-  an undeclared module can't gain the multiplier, but that is a safe default, not a fix for the missing
-  enforcement. Closing it (require attestation at submit/publish, and decide whether existing null rows
-  need backfill) is a Module Editor change, left for confirmation rather than made here unprompted.
+- **AI-attestation multiplier for AI Pipeline is 1×.** The doc gives 10×/2× for the two live tiers and
+  "1×" for the deferred AI Pipeline tier. Adjust in `lib/search.ts:ATTESTATION_MULTIPLIER` if a
+  different call is made. (A NULL attestation also floors at 1× defensively, but it no longer reaches
+  ranking — see the resolved gap below.)
+- **RESOLVED — AI-attestation is now enforced at submission.** Section 9.4 requires a declaration
+  "before the system accepts it"; `submitForReview` (Module Editor) now rejects the draft →
+  pending-review transition when `ai_attestation` is null, and the
+  `20260803150000_backfill_null_ai_attestation` migration normalized any pre-enforcement
+  submitted/published rows to `ai_pipeline` (1×, the lowest multiplier — chosen because it exactly
+  matches the 1× the ranking code already applied to a null, so those rows gain no advantage; 2×/10×
+  would have handed them a boost). **The column stays nullable, deliberately:** a Draft legitimately
+  has no declaration until it reaches the submission gate, so `null` is the correct state for a Draft
+  and only for a Draft (Drafts are never ranked — search and homepage both filter `status =
+  published`). Making it `NOT NULL` would force a value at draft-creation, before the author has
+  declared, or require a fabricated default — so enforcement lives at the state transition, matching
+  how the branch gates other lifecycle requirements, not at the column. One caveat: `ai_pipeline`
+  permanently locks (`setAiAttestation` won't change away from it), so a backfilled legacy row can't
+  later be re-declared to its true tier; acceptable for the undeclared/dev rows this touches, flagged
+  in case real pre-enforcement content ever needs it.
 - **`context_tag` / `download_count` / `passing_completion_count` are retroactive `ContextualizedModule`
   additions** the Search sub-stage makes, not in Module Editor's original field list — same category as
   Seed Editor's `language`/`published_at` additions. `download_count` and `passing_completion_count`
@@ -305,11 +309,10 @@ Brief callouts; the real detail lives in the referenced files.
 **Two boundaries worth knowing up front:**
 
 - **All AI functionality is Phase 2.** Phase 1 ships every feature that *could* use AI as a
-  fully manual process with the same user-facing outcome — no automated review, screening, or
-  content generation anywhere on the platform. The AI layer (DEF-arbitration pre-publication
-  review, the authoring wizard, educator-verification screening, Big Questions merge
-  suggestions) is added on top later and narrows human workload rather than changing what a
-  feature does.
+  fully manual process with the same user-facing outcome — no automated review or screening
+  anywhere on the platform. The AI layer (DEF-arbitration pre-publication review,
+  educator-verification screening, Big Questions merge suggestions) is added on top later and
+  narrows human workload rather than changing what a feature does.
 - **Production hosting is deliberately deferred.** The eventual target (Hetzner VPS + Nginx +
   PM2, managed PostgreSQL, Let's Encrypt) is decided but intentionally not built yet — it is
   revisited as one block when the financial picture is clearer. Stage 0 is local-only by
@@ -408,7 +411,7 @@ up — rebuild with `docker compose down -v` and bring the environment back up.
 ├── lib/                     # Service layer — one module per feature area (see below)
 ├── prisma/
 │   ├── schema.prisma        # Full schema: User Management + Seed/Module/Lesson + Standing Scores + Library
-│   └── migrations/          # Committed migration history (11 migrations, additive)
+│   └── migrations/          # Committed migration history (12 migrations, additive + one data-fix)
 ├── db/init/                 # Postgres init (shadow + test databases, UTF-8)
 ├── tests/                   # Vitest: auth, lifecycle, seeds, modules, lesson plans, governance, …
 ├── docs/                    # Authoritative specs: LN_Webapp_Design + per-stage briefs/

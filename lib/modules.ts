@@ -193,9 +193,8 @@ export async function changeSeedReference(moduleId: string, authorId: string, ne
   });
 }
 
-// AI attestation locks permanently once it is ai_pipeline (Task 2). The wizard
-// is deferred, so ai_pipeline is only ever set manually now — but the lock rule
-// exists for later.
+// AI attestation locks permanently once it is ai_pipeline (Task 2): a module
+// declared ai_pipeline can never be redeclared to another tier.
 export async function setAiAttestation(
   moduleId: string,
   authorId: string,
@@ -229,6 +228,19 @@ export async function submitForReview(moduleId: string, authorId: string, now: D
   await assertDssNotLocked(authorId, now);
   if (module.status !== "draft") {
     throw new ModuleError("Only a draft can be submitted for review.");
+  }
+  // The AI-attestation declaration is required at submission (master design
+  // Section 9.4: "a Module Author must declare the generation profile ... before
+  // the system accepts it"). A Draft may legitimately carry a null attestation —
+  // it hasn't reached this gate yet — but the draft → pending-review transition is
+  // exactly where the declaration becomes mandatory, alongside the other
+  // submission-time requirements. Downstream ranking (Library search) and the
+  // endorsement Standing-Score payouts read this field, so it must be declared
+  // before content can accrue any of that.
+  if (module.ai_attestation == null) {
+    throw new ModuleError(
+      "An AI-attestation declaration is required before submitting a module for review.",
+    );
   }
   return prisma.contextualizedModule.update({
     where: { module_id: moduleId },

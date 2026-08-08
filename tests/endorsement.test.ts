@@ -594,7 +594,7 @@ describe("Library — Standing Score wiring (Task 6)", () => {
 
     // Build a module with a primary and a secondary seed.
     const { createModule, addSecondarySeed } = await import("@/lib/modules");
-    const module = await createModule({ authorAccountId: author.account_id, primarySeedId: seed.seed_id });
+    const module = await createModule({ authorAccountId: author.account_id, primarySeedId: seed.seed_id, aiAttestation: "wholly_human" });
     await addSecondarySeed(module.module_id, author.account_id, secondarySeed.seed_id);
     const page = await (await import("@/lib/module-authoring")).addPage(module.module_id, 0);
     await (await import("@/lib/module-authoring")).createElement(page.page_id, {

@@ -22,25 +22,22 @@ export type SortMode =
 
 export const DEFAULT_SORT: SortMode = "weighted_approval";
 
-// Section 9.4's multiplier table. The two v1 tiers (10× / 2×) are live; AI
-// Pipeline slots in at 1× when the authoring wizard ships (the doc's own value),
-// without renumbering.
+// Section 9.4's multiplier table. The two primary tiers (10× / 2×) are live; AI
+// Pipeline carries the doc's 1× value as the third, lowest tier.
 export const ATTESTATION_MULTIPLIER: Record<AiAttestation, number> = {
   wholly_human: 10,
   ai_assisted_manual_flair: 2,
   ai_pipeline: 1,
 };
 
-// The NULL case is NOT hypothetical: `ContextualizedModule.ai_attestation` is
-// nullable AND neither submitForReview nor publishModule enforces that it is set,
-// so a published module can genuinely reach ranking with no attestation. Section
-// 9.4 ("a Module Author must declare the generation profile ... before the system
-// accepts it") assumes submission enforces the declaration; it currently does
-// not. FLAGGED as a Module Editor gap (see the delivery summary) — not silently
-// papered over. Ranking treats a missing attestation as the neutral 1× floor (no
-// boost, no advantage) so an undeclared module cannot benefit from the multiplier;
-// that is the safe default while the enforcement gap stands, not a substitute for
-// closing it.
+// The column stays nullable, but a NULL attestation no longer reaches ranking:
+// submission now enforces the declaration at the draft → pending-review gate
+// (lib/modules.ts submitForReview), and the backfill migration
+// (20260803150000_backfill_null_ai_attestation) normalized any pre-enforcement
+// submitted/published rows. NULL now means only "still a Draft" — and Drafts are
+// never ranked (search and the homepage both filter `status = published`). The 1×
+// fallback is therefore a defensive floor for a case that shouldn't occur in a
+// ranked context, not a workaround for a live gap.
 export function attestationMultiplier(attestation: AiAttestation | null): number {
   return attestation == null ? 1 : ATTESTATION_MULTIPLIER[attestation];
 }
