@@ -238,7 +238,7 @@ describe("Standing Scores — drift, locking, restoration", () => {
     expect(restored.locked_at).toBeNull();
     expect(value(restored)).toBe(RESTORE_VALUE);
 
-    // Now (unlocked) a fresh grant from a different VE re-confers ve_status.
+    // Now (unlocked) a fresh grant from any token-holding VE re-confers ve_status.
     const granted = await grantPeerToken(veB.account_id, account.account_id);
     expect(granted.granting_account_id).toBe(veB.account_id);
     expect(

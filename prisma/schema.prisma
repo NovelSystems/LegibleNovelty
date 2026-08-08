@@ -879,15 +879,10 @@ model ContextualizedModule {
   version          Int       @default(0) // Increments on publish, not on autosave.
   publication_date DateTime?
 
-  // Author-declared; locks permanently if ai_pipeline (Task 2). Enforced non-null
-  // at the draft→pending_review transition (submitForReview), NOT at the column
-  // level: the column stays nullable on purpose because an in-progress draft
-  // legitimately has no declaration yet — the author writes content first and
-  // declares before submitting. A NOT NULL constraint would force a misleading
-  // placeholder at draft creation or forbid drafts without a declaration, both
-  // contradicting that flow. Pre-enforcement null rows were backfilled to the
-  // least-advantageous tier (ai_pipeline) by migration 20260808120000; null now
-  // only appears on unsubmitted drafts, which never reach ranking.
+  // Author-declared; locks permanently if ai_pipeline (Task 2). Required at
+  // submission (submitForReview), so the column is nullable only to allow an
+  // in-progress draft that hasn't been declared yet — a published module always
+  // has one.
   ai_attestation AiAttestation?
 
   // Commission Marketplace isn't built — soft reference (no FK). The snapshot

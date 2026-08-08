@@ -229,11 +229,6 @@ export async function submitForReview(moduleId: string, authorId: string, now: D
   if (module.status !== "draft") {
     throw new ModuleError("Only a draft can be submitted for review.");
   }
-  // Section 9.4: "a Module Author must declare the generation profile ... before
-  // the system accepts it." This is the enforcement point. A draft may sit with a
-  // null attestation while it is being written (createModule allows it), but the
-  // declaration is mandatory to leave draft — so a module can never reach
-  // pending_review, and therefore never publish or rank, without one.
   if (module.ai_attestation == null) {
     throw new ModuleError("An AI attestation must be declared before submitting for review.");
   }
