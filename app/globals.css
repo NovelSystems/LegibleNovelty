@@ -1,0 +1,225 @@
+/* ===========================================================================
+ * Legible Novelty — Design Tokens (single source of truth)
+ * ---------------------------------------------------------------------------
+ * Tailwind v4, CSS-first `@theme`. Every UI session MUST read from these tokens
+ * rather than inventing values. See docs/design-tokens.md for rationale.
+ *
+ * Direction: clarity, intuitiveness, simplicity over flair. Build like a tool.
+ *
+ * BRAND COLORS: the teal / gold / sage seeds are derived from the Legible
+ * Novelty logo (dark blue-teal frame + wordmark, muted-goldenrod dots, medium
+ * sage-teal tagline). Read from the provided logo render, not a pixel-exact
+ * sample of a source file — commit the logo (PNG/SVG) to the repo for an exact
+ * refinement. The scales/states below are tuned so text tokens still meet AA.
+ * ========================================================================= */
+
+@import "tailwindcss";
+
+@theme {
+  /* ---- Base ------------------------------------------------------------ */
+  --color-white: #ffffff; /* owner-confirmed pure white base (not off-white) */
+
+  /* ---- Primary: deep teal (logo frame + wordmark; seed = teal-600) ----- */
+  --color-teal-50: #eaf4f5;
+  --color-teal-100: #cae4e7;
+  --color-teal-200: #9fccd1;
+  --color-teal-300: #67a6ad; /* disabled primary (non-text) */
+  --color-teal-400: #3a828b;
+  --color-teal-500: #226a73;
+  --color-teal-600: #1c4e57; /* PRIMARY base — 9.22:1 on white (AAA text) */
+  --color-teal-700: #163e46; /* primary hover — 11.59:1 */
+  --color-teal-800: #102f36; /* primary active — 14.17:1 */
+  --color-teal-900: #0a2126;
+
+  /* ---- Accent: warm gold/mustard (logo dots; use sparingly; seed=400) -- */
+  --color-gold-50: #faf2e1;
+  --color-gold-100: #f2e1b9;
+  --color-gold-200: #e7cb85;
+  --color-gold-300: #d9b155;
+  --color-gold-400: #c89a3c; /* ACCENT fill/indicator — NOT for text (2.6:1) */
+  --color-gold-500: #a97f27;
+  --color-gold-600: #86631c; /* accent text on white — 5.50:1 (AA) */
+  --color-gold-700: #644913; /* accent text, stronger — 8.39:1 (AAA) */
+  --color-gold-800: #46330d;
+
+  /* ---- Secondary: sage / muted teal (logo tagline + dots; seed=400) ---- */
+  --color-sage-50: #eff4f2;
+  --color-sage-100: #dae7e3;
+  --color-sage-200: #bad0ca;
+  --color-sage-300: #8fb2aa;
+  --color-sage-400: #5e8d85; /* SECONDARY base (non-text / large; 3.73:1) */
+  --color-sage-500: #4c7970; /* ≈ tagline weight — 4.91:1 (AA) */
+  --color-sage-600: #3c5f58; /* secondary text on white — 7.07:1 (AAA) */
+  --color-sage-700: #2c4741;
+
+  /* ---- Neutral gray (not from logo; tuned to WCAG AA on white) --------- */
+  --color-gray-50: #f7f8f8; /* subtle surface */
+  --color-gray-100: #eef0ef; /* surface / muted bg */
+  --color-gray-200: #e1e4e3; /* default border */
+  --color-gray-300: #cbd0cf; /* input border / divider */
+  --color-gray-400: #9aa3a1; /* disabled / decorative (non-text) */
+  --color-gray-500: #63706d; /* muted text — 5.16:1 (AA) */
+  --color-gray-600: #4c5754; /* secondary text — 7.50:1 (AAA) */
+  --color-gray-700: #333b39; /* body text — 11.50:1 (AAA) */
+  --color-gray-800: #242a29; /* strong text — 14.60:1 */
+  --color-gray-900: #141918; /* headings — 17.77:1 */
+
+  /* ---- Danger (functional; forms need it — smallest useful set) -------- */
+  --color-danger-50: #fdecec;
+  --color-danger-100: #fad4d3;
+  --color-danger-500: #c62e29; /* danger fill */
+  --color-danger-600: #b4231f; /* danger text on white — 6.56:1 (AA) */
+  --color-danger-700: #8e1a17;
+
+  /* ---- Semantic aliases (shadcn/ui-compatible names) ------------------- */
+  /* These are what components should reference; the scales above are the
+   * palette they draw from. bg-primary / text-foreground / border-border etc. */
+  --color-background: var(--color-white);
+  --color-foreground: var(--color-gray-700); /* default body text */
+  --color-heading: var(--color-gray-900);
+
+  --color-primary: var(--color-teal-600);
+  --color-primary-hover: var(--color-teal-700);
+  --color-primary-active: var(--color-teal-800);
+  --color-primary-foreground: var(--color-white);
+  --color-primary-disabled: var(--color-teal-300);
+
+  --color-secondary: var(--color-sage-100); /* quiet surface for 2ndary UI */
+  --color-secondary-foreground: var(--color-sage-700);
+
+  --color-accent: var(--color-gold-400); /* fills/indicators (sparingly) */
+  --color-accent-foreground: var(--color-gray-900); /* dark text on gold */
+  --color-accent-text: var(--color-gold-700); /* gold-colored text on white */
+
+  --color-muted: var(--color-gray-100);
+  --color-muted-foreground: var(--color-gray-500);
+
+  --color-card: var(--color-white);
+  --color-card-foreground: var(--color-gray-700);
+
+  --color-border: var(--color-gray-200);
+  --color-input: var(--color-gray-300);
+  --color-ring: var(--color-teal-600); /* focus ring */
+
+  --color-danger: var(--color-danger-500);
+  --color-danger-foreground: var(--color-white);
+  --color-danger-text: var(--color-danger-600);
+
+  /* ---- Typography ------------------------------------------------------ */
+  /* Atkinson Hyperlegible = ALL interface text (default sans).
+   * Lora = module CONTENT only (reading/authoring body), via `font-module`. */
+  --font-sans: var(--font-atkinson), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
+  --font-module: var(--font-lora), ui-serif, Georgia, "Times New Roman", serif;
+
+  /* Modular scale (~1.2 minor third) with generous, legibility-first leading */
+  --text-xs: 0.75rem; /* 12px — fine print, meta */
+  --text-xs--line-height: 1.5;
+  --text-sm: 0.875rem; /* 14px — labels, secondary UI */
+  --text-sm--line-height: 1.5;
+  --text-base: 1rem; /* 16px — default UI body */
+  --text-base--line-height: 1.6;
+  --text-lg: 1.125rem; /* 18px */
+  --text-lg--line-height: 1.6;
+  --text-xl: 1.25rem; /* 20px — small headings */
+  --text-xl--line-height: 1.5;
+  --text-2xl: 1.5rem; /* 24px — h3 */
+  --text-2xl--line-height: 1.35;
+  --text-3xl: 1.875rem; /* 30px — h2 */
+  --text-3xl--line-height: 1.25;
+  --text-4xl: 2.25rem; /* 36px — h1 */
+  --text-4xl--line-height: 1.2;
+  /* Module reading size (Lora): larger + roomier leading for long-form text */
+  --text-module: 1.125rem; /* 18px */
+  --text-module--line-height: 1.75;
+
+  /* ---- Radius (modest, tool-like — not playful) ------------------------ */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+
+  /* ---- Motion easing (durations live in :root below) ------------------- */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1); /* default UI transition */
+  --ease-out: cubic-bezier(0, 0, 0.2, 1); /* enter / reveal */
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1); /* symmetric move */
+}
+
+/* ---------------------------------------------------------------------------
+ * Motion durations. Tailwind's `duration-*` utilities take raw numbers, so the
+ * canonical timings live here as variables for custom transitions and are
+ * documented so sessions reach for the SAME three, not arbitrary values.
+ * (Nearest Tailwind utilities: duration-100 ≈ fast, duration-200 = base,
+ *  duration-300 ≈ slow.)
+ * ------------------------------------------------------------------------- */
+:root {
+  --duration-fast: 120ms; /* hover, focus, tiny state changes */
+  --duration-base: 200ms; /* standard transition (default) */
+  --duration-slow: 320ms; /* larger surfaces (panels, disclosure) */
+}
+
+/* Spacing scale: Tailwind's default 0.25rem-based scale is adopted deliberately
+ * and left unchanged — one agreed scale, documented in docs/design-tokens.md.
+ * (This line makes that choice explicit rather than an unreviewed default.) */
+@theme {
+  --spacing: 0.25rem; /* base step: p-1 = 4px, p-2 = 8px, p-4 = 16px, … */
+}
+
+/* ---------------------------------------------------------------------------
+ * Base layer — the minimum needed for tokens to render correctly app-wide.
+ * ------------------------------------------------------------------------- */
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: 1.6;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    color: var(--color-heading);
+    font-weight: 700;
+    text-wrap: balance;
+  }
+
+  /* Visible, consistent focus for keyboard users — accessibility baseline. */
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  /* Module CONTENT wrapper: the ONLY place Lora is applied. Wrap authored
+   * module text (reader + authoring content area) in `.module-content`. */
+  .module-content {
+    font-family: var(--font-module);
+    font-size: var(--text-module);
+    line-height: 1.75;
+    color: var(--color-gray-800);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * prefers-reduced-motion — global baseline, not a per-component afterthought.
+ * Anyone who asks the OS for reduced motion gets near-instant transitions and
+ * animations everywhere. (The future loading-graph motif must also honor this.)
+ * ------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
