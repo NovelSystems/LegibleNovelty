@@ -7,30 +7,30 @@
 type Swatch = { name: string; cls: string; hex: string; dark?: boolean };
 
 const teal: Swatch[] = [
-  { name: "50", cls: "bg-teal-50", hex: "#eaf5f4" },
-  { name: "100", cls: "bg-teal-100", hex: "#cfe7e5" },
-  { name: "200", cls: "bg-teal-200", hex: "#a6d2cf" },
-  { name: "300", cls: "bg-teal-300", hex: "#6fb3af" },
-  { name: "400", cls: "bg-teal-400", hex: "#3d908c", dark: true },
-  { name: "500", cls: "bg-teal-500", hex: "#167c78", dark: true },
-  { name: "600·primary", cls: "bg-teal-600", hex: "#0f6360", dark: true },
-  { name: "700·hover", cls: "bg-teal-700", hex: "#0c4f4d", dark: true },
-  { name: "800·active", cls: "bg-teal-800", hex: "#0a403e", dark: true },
-  { name: "900", cls: "bg-teal-900", hex: "#072b2a", dark: true },
+  { name: "50", cls: "bg-teal-50", hex: "#eaf4f5" },
+  { name: "100", cls: "bg-teal-100", hex: "#cae4e7" },
+  { name: "200", cls: "bg-teal-200", hex: "#9fccd1" },
+  { name: "300", cls: "bg-teal-300", hex: "#67a6ad" },
+  { name: "400", cls: "bg-teal-400", hex: "#3a828b", dark: true },
+  { name: "500", cls: "bg-teal-500", hex: "#226a73", dark: true },
+  { name: "600·primary", cls: "bg-teal-600", hex: "#1c4e57", dark: true },
+  { name: "700·hover", cls: "bg-teal-700", hex: "#163e46", dark: true },
+  { name: "800·active", cls: "bg-teal-800", hex: "#102f36", dark: true },
+  { name: "900", cls: "bg-teal-900", hex: "#0a2126", dark: true },
 ];
 const gold: Swatch[] = [
-  { name: "100", cls: "bg-gold-100", hex: "#f5e4bf" },
-  { name: "300", cls: "bg-gold-300", hex: "#e0b457" },
-  { name: "400·accent", cls: "bg-gold-400", hex: "#ce9a2c" },
-  { name: "600·text", cls: "bg-gold-600", hex: "#916413", dark: true },
-  { name: "700·text", cls: "bg-gold-700", hex: "#6f4e0e", dark: true },
+  { name: "100", cls: "bg-gold-100", hex: "#f2e1b9" },
+  { name: "300", cls: "bg-gold-300", hex: "#d9b155" },
+  { name: "400·accent", cls: "bg-gold-400", hex: "#c89a3c" },
+  { name: "600·text", cls: "bg-gold-600", hex: "#86631c", dark: true },
+  { name: "700·text", cls: "bg-gold-700", hex: "#644913", dark: true },
 ];
 const sage: Swatch[] = [
-  { name: "100", cls: "bg-sage-100", hex: "#dee8e4" },
-  { name: "300", cls: "bg-sage-300", hex: "#9db6ad" },
-  { name: "400·secondary", cls: "bg-sage-400", hex: "#7c9b90" },
-  { name: "600·text", cls: "bg-sage-600", hex: "#495f55", dark: true },
-  { name: "700", cls: "bg-sage-700", hex: "#37463f", dark: true },
+  { name: "100", cls: "bg-sage-100", hex: "#dae7e3" },
+  { name: "300", cls: "bg-sage-300", hex: "#8fb2aa" },
+  { name: "400·secondary", cls: "bg-sage-400", hex: "#5e8d85" },
+  { name: "600·text", cls: "bg-sage-600", hex: "#3c5f58", dark: true },
+  { name: "700", cls: "bg-sage-700", hex: "#2c4741", dark: true },
 ];
 const gray: Swatch[] = [
   { name: "50", cls: "bg-gray-50", hex: "#f7f8f8" },
@@ -163,7 +163,7 @@ export default function StyleGuidePage() {
 
       <footer className="text-xs text-muted-foreground border-t border-border pt-6">
         Tokens: <code>app/globals.css</code> · Reference: <code>docs/design-tokens.md</code>. Brand
-        color seeds are placeholders pending a logo sample.
+        color seeds are derived from the Legible Novelty logo.
       </footer>
     </main>
   );

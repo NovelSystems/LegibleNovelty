@@ -6,11 +6,11 @@
  *
  * Direction: clarity, intuitiveness, simplicity over flair. Build like a tool.
  *
- * NOTE ON BRAND COLORS: the four brand seeds (teal / gold / sage) are
- * PLACEHOLDERS chosen from the owner's named palette — they were NOT sampled
- * from the logo, which is absent from the repo. A later session should sample
- * the logo source and replace the seed hexes below; the scales, states, and
- * everything downstream are structured to absorb that swap without changes.
+ * BRAND COLORS: the teal / gold / sage seeds are derived from the Legible
+ * Novelty logo (dark blue-teal frame + wordmark, muted-goldenrod dots, medium
+ * sage-teal tagline). Read from the provided logo render, not a pixel-exact
+ * sample of a source file — commit the logo (PNG/SVG) to the repo for an exact
+ * refinement. The scales/states below are tuned so text tokens still meet AA.
  * ========================================================================= */
 
 @import "tailwindcss";
@@ -19,38 +19,38 @@
   /* ---- Base ------------------------------------------------------------ */
   --color-white: #ffffff; /* owner-confirmed pure white base (not off-white) */
 
-  /* ---- Primary: deep teal (PLACEHOLDER seed = teal-600) ---------------- */
-  --color-teal-50: #eaf5f4;
-  --color-teal-100: #cfe7e5;
-  --color-teal-200: #a6d2cf;
-  --color-teal-300: #6fb3af; /* disabled primary (non-text) */
-  --color-teal-400: #3d908c;
-  --color-teal-500: #167c78;
-  --color-teal-600: #0f6360; /* PRIMARY base — 7.06:1 on white (AAA text) */
-  --color-teal-700: #0c4f4d; /* primary hover — 9.37:1 */
-  --color-teal-800: #0a403e; /* primary active — 11.56:1 */
-  --color-teal-900: #072b2a;
+  /* ---- Primary: deep teal (logo frame + wordmark; seed = teal-600) ----- */
+  --color-teal-50: #eaf4f5;
+  --color-teal-100: #cae4e7;
+  --color-teal-200: #9fccd1;
+  --color-teal-300: #67a6ad; /* disabled primary (non-text) */
+  --color-teal-400: #3a828b;
+  --color-teal-500: #226a73;
+  --color-teal-600: #1c4e57; /* PRIMARY base — 9.22:1 on white (AAA text) */
+  --color-teal-700: #163e46; /* primary hover — 11.59:1 */
+  --color-teal-800: #102f36; /* primary active — 14.17:1 */
+  --color-teal-900: #0a2126;
 
-  /* ---- Accent: warm gold/mustard (use sparingly; PLACEHOLDER seed=400) - */
-  --color-gold-50: #fbf3e2;
-  --color-gold-100: #f5e4bf;
-  --color-gold-200: #edcf8c;
-  --color-gold-300: #e0b457;
-  --color-gold-400: #ce9a2c; /* ACCENT fill/indicator — NOT for text (2.5:1) */
-  --color-gold-500: #b4831c;
-  --color-gold-600: #916413; /* accent text on white — 5.20:1 (AA) */
-  --color-gold-700: #6f4e0e; /* accent text, stronger — 7.58:1 (AAA) */
-  --color-gold-800: #4e360a;
+  /* ---- Accent: warm gold/mustard (logo dots; use sparingly; seed=400) -- */
+  --color-gold-50: #faf2e1;
+  --color-gold-100: #f2e1b9;
+  --color-gold-200: #e7cb85;
+  --color-gold-300: #d9b155;
+  --color-gold-400: #c89a3c; /* ACCENT fill/indicator — NOT for text (2.6:1) */
+  --color-gold-500: #a97f27;
+  --color-gold-600: #86631c; /* accent text on white — 5.50:1 (AA) */
+  --color-gold-700: #644913; /* accent text, stronger — 8.39:1 (AAA) */
+  --color-gold-800: #46330d;
 
-  /* ---- Secondary: sage / muted teal (PLACEHOLDER seed = sage-400) ------ */
-  --color-sage-50: #f1f5f3;
-  --color-sage-100: #dee8e4;
-  --color-sage-200: #c2d3cc;
-  --color-sage-300: #9db6ad;
-  --color-sage-400: #7c9b90; /* SECONDARY base (non-text / large; 3.02:1) */
-  --color-sage-500: #5f8074;
-  --color-sage-600: #495f55; /* secondary text on white — 6.88:1 (AA) */
-  --color-sage-700: #37463f;
+  /* ---- Secondary: sage / muted teal (logo tagline + dots; seed=400) ---- */
+  --color-sage-50: #eff4f2;
+  --color-sage-100: #dae7e3;
+  --color-sage-200: #bad0ca;
+  --color-sage-300: #8fb2aa;
+  --color-sage-400: #5e8d85; /* SECONDARY base (non-text / large; 3.73:1) */
+  --color-sage-500: #4c7970; /* ≈ tagline weight — 4.91:1 (AA) */
+  --color-sage-600: #3c5f58; /* secondary text on white — 7.07:1 (AAA) */
+  --color-sage-700: #2c4741;
 
   /* ---- Neutral gray (not from logo; tuned to WCAG AA on white) --------- */
   --color-gray-50: #f7f8f8; /* subtle surface */

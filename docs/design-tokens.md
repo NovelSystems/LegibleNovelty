@@ -15,11 +15,13 @@ to prevent.
 - **Design direction:** clarity, intuitiveness, simplicity over visual flair.
   Build like a well-made tool. There is no "signature element" here on purpose.
 
-> **Brand colors are placeholders.** The four brand seeds (teal, gold, sage)
-> were chosen from the owner's *named* palette, **not sampled from the logo** —
-> the logo file is not in the repo. When it is available, sample it and replace
-> the seed hexes in `@theme`; the scales, semantic aliases, contrast structure,
-> and everything downstream are built to absorb that swap without other changes.
+> **Brand colors come from the logo.** The teal, gold, and sage seeds are
+> derived from the Legible Novelty logo — the dark blue-teal frame and wordmark
+> (primary), the muted-goldenrod dots (accent), and the medium sage-teal tagline
+> (secondary). They were read from the provided logo *render*, not a pixel-exact
+> sample of a source file; commit the logo (PNG/SVG) to the repo for an exact
+> refinement. Only the `teal-*` / `gold-*` / `sage-*` seed hexes in `@theme`
+> would change — scales, aliases, and contrast structure absorb it unchanged.
 
 ---
 
@@ -39,10 +41,10 @@ The main interactive color: primary buttons, links, active states, focus ring.
 
 | Token | Hex | On white | Role |
 |---|---|---|---|
-| `teal-600` | `#0f6360` | 7.06:1 (AAA) | **Primary base** — also carries white text on it (7.06:1) |
-| `teal-700` | `#0c4f4d` | 9.37:1 | Primary **hover** |
-| `teal-800` | `#0a403e` | 11.56:1 | Primary **active/pressed** |
-| `teal-300` | `#6fb3af` | 2.40:1 | **Disabled** primary (non-text; exempt from AA) |
+| `teal-600` | `#1c4e57` | 9.22:1 (AAA) | **Primary base** — also carries white text on it (9.22:1) |
+| `teal-700` | `#163e46` | 11.59:1 | Primary **hover** |
+| `teal-800` | `#102f36` | 14.17:1 | Primary **active/pressed** |
+| `teal-300` | `#67a6ad` | 2.75:1 | **Disabled** primary (non-text; exempt from AA) |
 | `teal-50…200`, `400/500/900` | — | — | Tint backgrounds, borders, decorative |
 
 ### Accent — warm gold / mustard
@@ -52,19 +54,20 @@ calls-to-action. Gold is low-contrast on white, so it splits by use:
 
 | Token | Hex | On white | Role |
 |---|---|---|---|
-| `gold-400` | `#ce9a2c` | 2.54:1 | Accent **fill / indicator** (NOT text) |
-| `gold-600` | `#916413` | 5.20:1 (AA) | Accent **text** on white |
-| `gold-700` | `#6f4e0e` | 7.58:1 (AAA) | Accent text, stronger |
-| dark text on `gold-400` | — | 7.01:1 | e.g. a gold chip with `gray-900` label |
+| `gold-400` | `#c89a3c` | 2.58:1 | Accent **fill / indicator** (NOT text) |
+| `gold-600` | `#86631c` | 5.50:1 (AA) | Accent **text** on white |
+| `gold-700` | `#644913` | 8.39:1 (AAA) | Accent text, stronger |
+| dark text on `gold-400` | — | 6.89:1 | e.g. a gold chip with `gray-900` label |
 
 ### Secondary — sage / muted teal
 For **less prominent** UI: quiet surfaces, secondary buttons, supporting chrome.
 
 | Token | Hex | On white | Role |
 |---|---|---|---|
-| `sage-100` | `#dee8e4` | — | Quiet secondary **surface** (`--color-secondary`) |
-| `sage-400` | `#7c9b90` | 3.02:1 | Secondary **fill** (non-text / large) |
-| `sage-600` | `#495f55` | 6.88:1 (AA) | Secondary **text** |
+| `sage-100` | `#dae7e3` | — | Quiet secondary **surface** (`--color-secondary`) |
+| `sage-400` | `#5e8d85` | 3.73:1 | Secondary **fill** (non-text / large) |
+| `sage-500` | `#4c7970` | 4.91:1 (AA) | ≈ logo tagline weight |
+| `sage-600` | `#3c5f58` | 7.07:1 (AAA) | Secondary **text** |
 
 ### Neutral gray
 Not from the logo — chosen to hit AA on white, with a faint cool undertone so it
@@ -195,5 +198,5 @@ components do not need to re-implement it.
 1. Need a color/size/timing that exists? Use the token. Don't re-derive it.
 2. Need one that doesn't exist yet? Add it **here and in `@theme`**, with a one-line
    rationale, so the next session inherits it. Don't inline a one-off value.
-3. Replacing the placeholder brand hexes with sampled logo values? Edit only the
+3. Refining the brand hexes from a pixel-exact logo sample? Edit only the
    `teal-*` / `gold-*` / `sage-*` seed hexes in `@theme`; everything else follows.
