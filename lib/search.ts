@@ -30,14 +30,10 @@ export const ATTESTATION_MULTIPLIER: Record<AiAttestation, number> = {
   ai_pipeline: 1,
 };
 
-// `ContextualizedModule.ai_attestation` is nullable, but a published module can
-// no longer reach ranking with a null attestation: submitForReview now enforces
-// Section 9.4's declaration requirement at the draft→pending_review transition,
-// and a backfill migration set every pre-enforcement null row to the
-// least-advantageous tier (ai_pipeline, 1×). Null now occurs only on in-progress
-// drafts, which buildWhere's `status: "published"` filter excludes from ranking.
-// The 1× return below is therefore a defensive floor for a case ranking should
-// never see, not the load-bearing handler for an open enforcement gap.
+// `ai_attestation` is nullable (a draft may not have declared one yet), so a null
+// is accepted defensively and treated as the lowest tier (1×, same as
+// ai_pipeline). Ranking only sees published modules, which always carry a
+// declared attestation, so the null branch is not reached in practice.
 export function attestationMultiplier(attestation: AiAttestation | null): number {
   return attestation == null ? 1 : ATTESTATION_MULTIPLIER[attestation];
 }

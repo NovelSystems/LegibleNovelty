@@ -191,9 +191,6 @@ confirmed; changing them is a decision, not a bug:
   primary; this is an inferred requirement, not stated in the source.
 - **Publish quota applies uniformly regardless of role** — no VE/Admin exemption from the
   pre-endorsement cap; not stated either way, worth confirming.
-- **The "different VE than the original granter" ESS-restoration constraint is no longer enforced
-  anywhere** after the restore-then-grant reordering (the dead `canRestoreEss` helper was deleted);
-  re-adding it is a separate design decision.
 - **Publish-immediately posture** (Module Editor Task 3) is explicitly tied to the pilot's small,
   known user base and should be revisited before any wider launch.
 - **Template creation is built admin-only** (the narrower default); whether module authors can

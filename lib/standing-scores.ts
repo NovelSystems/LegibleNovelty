@@ -313,7 +313,7 @@ async function recordDiscretionaryEvent(
 
 // Reset to 5, unlock, and anchor drift to the resolution time. Identical for
 // ESS/DSS/CSS and for numeric-trigger vs direct-trigger locks — no special
-// cases. ESS's extra token-grant precondition is enforced by restoreEssLock().
+// cases.
 export async function restoreStandingScore(
   args: {
     accountId: string;
@@ -345,17 +345,12 @@ export async function restoreStandingScore(
 
 // --- ESS restoration ---------------------------------------------------------
 
-// FLAGGED (cleanup carried from the Standing Scores brief, resolved here): the
-// earlier design made "a fresh TokenGrant from a different VE" a PRECONDITION of
-// ESS restoration (the old canRestoreEss gate). The latch rule rejects peer
-// grants to a latched account outright, so such a grant can no longer PRECEDE
-// restoration — the precondition became unsatisfiable. The coherent ordering is
-// restore-THEN-grant: the moderator appeal unlocks the latch (uniform
-// restoration), then a different VE issues a fresh grant that re-confers
-// ve_status. The old canRestoreEss helper was therefore dead code and has been
-// DELETED. NOTE (flagged in the summary): the "different VE than the original
-// granter" constraint is consequently no longer enforced anywhere; re-adding it
-// as a grant-time check is a separate design decision.
+// ESS restoration is the uniform restore with no ESS-specific precondition —
+// restoreEssLock is a thin scoreType="ESS" wrapper. A moderator appeal unlocks
+// the latch; re-conferring ve_status afterward is an ordinary peer-token grant.
+// The recipient does not have to return to the specific VE who granted their
+// prior token — any VE holding an available token can grant a replacement. That
+// permissiveness is the intent, not a required-different-VE check.
 export async function restoreEssLock(
   args: { accountId: string; resolutionTime: Date } & ModeratorAttribution,
 ) {
