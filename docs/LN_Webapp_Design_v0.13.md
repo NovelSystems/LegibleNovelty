@@ -93,7 +93,7 @@ All sort modes carry an arrow toggle for inversion (↑↓) — inversion is a t
 
 #### 9.4 AI Attestation and Ranking Multiplier
 
-At submission, a Module Author must declare the generation profile used to produce the module before the system accepts it. **Two options in v1** (a third, AI Pipeline, is deferred along with the authoring wizard itself — Section 18):
+At submission, a Module Author must declare the generation profile used to produce the module before the system accepts it. **Two options are available for author declaration:**
 
 - **Wholly Human-Crafted**: no generative AI text, layout, or structural output was used.
 - **AI-Assisted with Manual Flair**: core text or structure was produced or adapted using AI tools (the author's own, external to the platform — Section 7.2), but the author manually edited the output or engineered significant portions of the layout.
@@ -103,7 +103,7 @@ At submission, a Module Author must declare the generation profile used to produ
 | Wholly Human-Crafted | 10× |
 | AI-Assisted with Manual Flair | 2× |
 
-A third tier, **AI Pipeline** (1× multiplier, produced using the future authoring wizard), reactivates when that feature ships (Section 18); the ratios above are already designed to extend cleanly to a third, lower tier without renumbering the multiplier scheme.
+A third tier, **AI Pipeline** (1× multiplier), covers modules produced by an automated pipeline; the ratios above are designed to extend cleanly to this third, lower tier without renumbering the multiplier scheme.
 
 A Wholly Human-Crafted module with 9 endorsements ranks above an AI-Assisted module with 44 endorsements (90 vs. 88 weighted score). This does not prohibit or absolutely disadvantage AI-assisted content; it equalizes the playing field against the physics of automated output volume.
 
@@ -118,7 +118,7 @@ The multiplier applies only to the weighted sort formulas (Section 9.3); it has 
 - Subject area / curriculum alignment (Section 6)
 - Language
 - Endorsement status — binary: at least one educator endorsement (yes) or none (no); no count threshold at the filter level
-- AI attestation tier — Wholly Human-Crafted / AI-Assisted with Manual Flair / all (a third tier, AI Pipeline, reactivates when the authoring wizard ships — Section 9.4, Section 18)
+- AI attestation tier — Wholly Human-Crafted / AI-Assisted with Manual Flair / all (a third tier, AI Pipeline, covers automated-pipeline modules — Section 9.4)
 
 **Eligibility gate (anti-bot), applies to recommendations, public module comments (Section 11.2), and the commission support button (Section 13):** an account must be at least 7 days old and have a completed profile. New accounts attempting a gated action before eligibility see an encouraging message directing them toward exploring modules during their first week, framed as onboarding guidance rather than rejection.
 
@@ -325,7 +325,7 @@ There is no automated Archived state for seeds or modules (in contrast to commis
 **Edit scope:** everything is editable post-publication, with specific exceptions and special handling:
 - The **seed reference** can be changed (use case: a better or more popular seed chain becomes available) but triggers special attention in the pre-publication AI review (Section 8), which throws an error if the module's content does not satisfy the new seed's constraints.
 - **Commission association** can be changed in either direction — attached, detached, or reattached — because a module may be created before a matching commission exists.
-- **AI attestation** can be changed unless the module was created via the AI Pipeline wizard (Section 7.2), in which case AI Pipeline attestation is permanently locked and cannot be changed to Wholly Human-Crafted or AI-Assisted.
+- **AI attestation** can be changed unless it is set to AI Pipeline, in which case it is permanently locked and cannot be changed to Wholly Human-Crafted or AI-Assisted.
 - The **commission snapshot** (Section 13.4) is frozen at original publication regardless of any later edits to anything else on the module.
 
 **Seed versioning and dependent modules:** modules remain permanently tied to the specific seed version they were built against. A seed revision does not retroactively affect, invalidate, or require review of any existing module built on a prior version. The seed version string displays alongside the seed reference anywhere it appears on a module (title page, metadata). New modules built after a seed revision use the new version going forward; old versions remain permanently accessible and citable.
@@ -389,8 +389,6 @@ The adopted model: the architect invites **specific registered accounts** (not o
 #### 7.2 Module Authoring
 
 **V1 ships with a single authoring path: Wholly Human-Crafted or AI-Assisted with Manual Flair.** Direct authoring in the TipTap editor (selected for its extensibility, active maintenance, and custom-node-type support — see Section 17.3 for the full tooling rationale). Fillable fields are implemented as custom TipTap node types: each field carries a unique author-assigned identifier, used both for scoring and for progress-saving (Section 7.5). An author who uses their own external AI tools (their own account with any provider) to help draft content, then adapts and edits it manually before pasting it into the editor, attests honestly at submission (Section 9.4) — this costs the platform nothing, since no platform-hosted inference is involved.
-
-**The platform-hosted AI authoring wizard (a second, optional path generating full module drafts from a seed) is deferred to a later release, once a contributor base is established, specifically to avoid launching with an unresolved compute-cost and pricing model.** Full wizard specification, and the open questions around pricing it, are captured in Section 18.
 
 ---
 
@@ -956,9 +954,9 @@ Auth.js, self-hosted, with **database sessions** (not JWT) — database sessions
 
 A maintained, editable lookup table (in platform administration, not hardcoded) of teacher registry URLs by jurisdiction, referenced by the AI pre-screening pass during Verified Educator manual review (Section 4.1). One-time research task to compile, with occasional maintenance as URLs change.
 
-#### 17.6 AI Pipeline Inference Infrastructure
+#### 17.6 Inference Infrastructure
 
-Self-hosted, on the Andromeda rig: dual ASRock Arc Pro B60 (48GB VRAM total), Fedora, IPEX-LLM as the inference backend (preferred over the llama.cpp SYCL path for Arc GPU workloads). **Currently CANDOR Phase 2 research infrastructure only** (LoRA fine-tuning, expanded benchmarks); the module-authoring wizard's use of this same hardware is deferred along with the wizard itself (Section 7.2, Section 18), specifically so the wizard doesn't launch before its compute-cost allocation between the two projects, and its pricing model if any, are resolved.
+Self-hosted, on the Andromeda rig: dual ASRock Arc Pro B60 (48GB VRAM total), Fedora, IPEX-LLM as the inference backend (preferred over the llama.cpp SYCL path for Arc GPU workloads). **Currently CANDOR Phase 2 research infrastructure only** (LoRA fine-tuning, expanded benchmarks).
 
 #### 17.7 Repository and License
 
@@ -1066,21 +1064,6 @@ Confirmed as planned, but intentionally not built in the first version:
 7. **Flair tag upload/template system** — schema field reserved now (`flair_tags`), full implementation deferred (Section 5.3).
 8. **Full Awards nomination/adjudication UI and activation** — backend schema only for v1 (Section 14.7).
 9. **News feed** itself (chronological, interest-domain-filtered activity stream for logged-in users) — described in design discussion but not yet built; surfaces new modules, endorsements, recently answered Big Questions, and active community discussions within a user's interest domains, explicitly excluding individual corrections/recommendations and moderation activity to avoid noise.
-10. **The AI authoring wizard** (platform-hosted, generates full module drafts from a seed) — deferred until an established contributor base exists. Full mechanic, already designed and ready to build when this is picked back up:
-
-    - **Input.** Seed is pre-loaded (via commission autofill, Section 13, or manual selection). Special interest field is free text, or imported from an associated commission. Grade range is confirmed or narrowed by the author from the seed's range.
-    - **Brainstorm.** The LLM generates 2-3 structural approaches connecting the special interest to the seed's learning objective. The author selects one or describes an alternative direction. The LLM asks clarifying questions to refine the chosen approach before generation begins.
-    - **Generation (skeleton-first).** The LLM generates a complete structural skeleton of the full module first — all elements outlined but not fully written — then expands each element into polished content sequentially as it's presented to the author. Generation order is deliberate: introduction, content sections in sequence, questions (with answers and advice) in sequence, conclusion. This order ensures author corrections on earlier elements propagate forward to inform not-yet-generated later elements through the model's context window, with no separate correction-summarization step required, since the pipeline is strictly forward-generating and never reprocesses already-approved elements.
-    - **Element review.** Each element is presented individually with a feedback text window and an approve button. Feedback triggers regeneration of that specific element only. Approved elements lock unless the author returns to edit them.
-    - **Full module review.** All approved elements assemble into a complete preview, with per-element edit/reorder buttons and a whole-module approve button.
-    - **Submission.** AI attestation is pre-filled as AI Pipeline and permanently locked — a wizard-generated module can never be redeclared as Wholly Human-Crafted or AI-Assisted, even after later manual edits.
-    - **Rate limiting:** no delay on the first presented element, +8 second delay on each subsequent element, to control inference cost and discourage spam-generation without reading.
-    - **Flair is never available in this wizard**, under any circumstance, for the reason stated in Section 5.3: it requires human creative input by definition.
-    - **Eventual training goal:** the brainstorm step is intended to eventually train on platform-wide module success signals (endorsement count, completion rate, recommendations) to bias toward formats that have worked historically, without forcing authors into previously-tried patterns — this implies a separately fine-tuned model rather than a generic LLM call, and the training loop only becomes meaningful once sufficient platform module volume exists.
-
-    **Open questions to resolve before this ships, not after:**
-    - **Cost basis is ambiguous for self-hosted, shared infrastructure.** The Andromeda rig (Section 17.6) is a fixed, already-owned asset shared with CANDOR research work, not a metered cloud API. "Price near average cost" requires deciding whether "cost" means marginal cost (electricity and wear on hardware already running for CANDOR regardless — likely quite low) or fully-loaded average cost (hardware purchase amortized across usage, which requires an explicit allocation split between Legible Novelty and CANDOR). These produce very different numbers; pick one deliberately rather than defaulting.
-    - **Pricing must be disclosed alongside the ranking tradeoff, not separately.** Wizard output attests as AI Pipeline, which will carry the lowest ranking multiplier of the (by then) three-tier system (Section 9.4). Anyone paying for the wizard should understand clearly, at the point of payment, that they are paying for drafting speed and convenience, not for a ranking advantage, and that the output will need to earn visibility the same way any other module does. Surfacing this only after a paying author is confused or frustrated by low visibility is worse than stating it plainly up front.
 
 ---
 
@@ -1106,14 +1089,14 @@ This section records the subsystem boundaries agreed on for the Claude Code buil
 4. **User Management** — account state and identity. Account Lifecycle (Section 3: date of birth, child sub-accounts, purge, reclaim), Connections (Sections 12.2–12.3), Verified Educator verification paths and peer-token accountability (Sections 4.1–4.2 — evaluation and accountability logic with no content-delivery shape, and so not part of the mini-LMS), the resulting VE/LNC account flags themselves, and Account Status Badges (Section 21), which display that state.
 5. **Communication** — Forum (Section 11.4), Module Comments (Sections 11.2–11.3), Big Questions **submission/append/participation only** (the account-gated half of Section 11.1 — reading stays Library).
 6. **Notification** — Section 16 (email and in-app notifications, including the weekly digest). Kept separate from Communication as push/alert infrastructure rather than social content.
-7. **Infrastructure** — Section 17 (hosting, auth session mechanics, editor tooling, AI pipeline inference, repository and license) and Section 8 (DEF Arbitration pre-publication review pipeline).
+7. **Infrastructure** — Section 17 (hosting, auth session mechanics, editor tooling, inference infrastructure, repository and license) and Section 8 (DEF Arbitration pre-publication review pipeline).
 8. **Payments & Billing** — Section 23. FotL recurring subscriptions, LNC training one-time payments, sponsored-commission visibility payments, and (future) institutional licensing invoicing.
 
 **Explicit design decision, not an oversight: Trust & Safety is deliberately distributed, not a standalone subsystem.** Its pieces (Section 10's content-quality moderation, comment/forum moderation, Section 4.2's peer-token accountability) are assigned to whichever subsystem they substantively belong to (Workshop, Communication, User Management respectively) rather than centralized, since no single owning concern justified pulling them out of context.
 
 **All four items originally flagged here are now resolved.** Lesson Plans (Section 12.1) moved to Part I (Library) — curating existing modules is content interaction, not generation, and this directly serves the principle that a Verified Educator who only assigns lesson plans shouldn't need to be a Workshop user. Awards (Section 14) moved to Part IV (User Management) — nominating or displaying a badge recognizes a contributor's identity, it doesn't touch content at all. Quality Control and Moderation (Section 10) and Commission Marketplace (Section 13) both settled in Part II (Workshop): review is inseparable from the authoring pipeline it gates, and the marketplace exists as a whole to drive content creation, posting and browsing included, not just fulfillment.
 
-**Explicit scope decision: no AI functionality of any kind ships in Phase 1, not only the hardware-dependent features.** DEF Arbitration (Section 8) and the authoring wizard (Section 7.2/18) were already Phase 2 for compute/hardware reasons. This decision extends the same boundary to two lighter-weight AI touchpoints that don't themselves require new hardware: Verified Educator verification's AI-assisted directory lookup and document screening (Section 4.1), and Big Questions' AI-computed merge-suggestion (Section 11.3). Both ship in Phase 1 as fully manual processes with the same end-user-facing outcome (an application gets reviewed; a question can still be merged), the AI layer added on top in Phase 2 narrows the human workload rather than changing what the feature does. Phase 1 therefore has zero automated review, screening, or content generation anywhere on the platform.
+**Explicit scope decision: no AI functionality of any kind ships in Phase 1, not only the hardware-dependent features.** DEF Arbitration (Section 8) was already Phase 2 for compute/hardware reasons. This decision extends the same boundary to two lighter-weight AI touchpoints that don't themselves require new hardware: Verified Educator verification's AI-assisted directory lookup and document screening (Section 4.1), and Big Questions' AI-computed merge-suggestion (Section 11.3). Both ship in Phase 1 as fully manual processes with the same end-user-facing outcome (an application gets reviewed; a question can still be merged), the AI layer added on top in Phase 2 narrows the human workload rather than changing what the feature does. Phase 1 therefore has zero automated review or screening anywhere on the platform.
 
 **Cross-system dependency worth flagging as a real boundary, not an implementation detail:** Certification Center's LNC path cannot proceed past payment without Payments & Billing (Section 23) clearing first — a mid-flow dependency, not a clean one-directional pipeline.
 

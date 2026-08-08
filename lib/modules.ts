@@ -193,9 +193,8 @@ export async function changeSeedReference(moduleId: string, authorId: string, ne
   });
 }
 
-// AI attestation locks permanently once it is ai_pipeline (Task 2). The wizard
-// is deferred, so ai_pipeline is only ever set manually now — but the lock rule
-// exists for later.
+// AI attestation locks permanently once it is ai_pipeline (Task 2): a module
+// declared ai_pipeline can never be redeclared to another tier.
 export async function setAiAttestation(
   moduleId: string,
   authorId: string,

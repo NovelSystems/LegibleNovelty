@@ -167,8 +167,6 @@ things that look done:
   Center's own dependency.
 - **DEF Arbitration (Phase 2).** Module Editor reserves a nullable `prepublication_review_report`
   column for the eventual report; the AI pre-publication review itself is compute-dependent Phase 2.
-- **AI authoring wizard.** Deferred pending an established contributor base and an unresolved pricing
-  model; Module Editor's `AiAttestation` lock rule exists in anticipation of it.
 - **Escalation panel staffing.** Module Editor builds the appeal **schema** (`ModuleReviewAppeal`,
   3+ distinct reviewers); the panel's actual staffing/recruitment is marked "pending Phase 1
   staffing decision" in the governance policy and is not built.
@@ -311,11 +309,10 @@ Brief callouts; the real detail lives in the referenced files.
 **Two boundaries worth knowing up front:**
 
 - **All AI functionality is Phase 2.** Phase 1 ships every feature that *could* use AI as a
-  fully manual process with the same user-facing outcome — no automated review, screening, or
-  content generation anywhere on the platform. The AI layer (DEF-arbitration pre-publication
-  review, the authoring wizard, educator-verification screening, Big Questions merge
-  suggestions) is added on top later and narrows human workload rather than changing what a
-  feature does.
+  fully manual process with the same user-facing outcome — no automated review or screening
+  anywhere on the platform. The AI layer (DEF-arbitration pre-publication review,
+  educator-verification screening, Big Questions merge suggestions) is added on top later and
+  narrows human workload rather than changing what a feature does.
 - **Production hosting is deliberately deferred.** The eventual target (Hetzner VPS + Nginx +
   PM2, managed PostgreSQL, Let's Encrypt) is decided but intentionally not built yet — it is
   revisited as one block when the financial picture is clearer. Stage 0 is local-only by
