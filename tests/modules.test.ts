@@ -172,6 +172,42 @@ describe("Module Editor — lifecycle, DSS lock, publication gate", () => {
     expect(submitted.status).toBe("pending_review");
   });
 
+  it("blocks promoting an incomplete Seed to a Module, and allows it once complete (Seed Editor promotion gate)", async () => {
+    const { subject, topic } = await makeTaxonomyPair({ subject: `Promo-${Date.now()}-${Math.random()}` });
+    const architect = await makeAccount();
+    // A published but INCOMPLETE seed: no curriculum_load / complexity / content.
+    const seed = await createSeedDraft({
+      architectAccountId: architect.account_id,
+      learningObjective: "Understand place value.",
+      entryPrerequisite: "Can count to 100.",
+      lessonSizeScope: "single-session",
+      subjectId: subject.taxonomy_id,
+      topicId: topic.taxonomy_id,
+      gradeRange: "ages 8-10",
+      notes: "",
+    });
+    await submitSeed(seed.seed_id, architect.account_id);
+    await publishSeed(seed.seed_id, architect.account_id);
+
+    const author = await makeAccount();
+    // Promotion (createModule) is rejected while the seed is incomplete.
+    await expect(
+      createModule({ authorAccountId: author.account_id, primarySeedId: seed.seed_id, aiAttestation: "wholly_human" }),
+    ).rejects.toBeInstanceOf(ModuleError);
+
+    // Fill the required completeness fields → the same promotion now succeeds.
+    await prisma.learningSeed.update({
+      where: { seed_id: seed.seed_id },
+      data: { curriculum_load: "worksheet", complexity: "beginner", content: "Worked examples for place value." },
+    });
+    const module = await createModule({
+      authorAccountId: author.account_id,
+      primarySeedId: seed.seed_id,
+      aiAttestation: "wholly_human",
+    });
+    expect(module.status).toBe("draft");
+  });
+
   it("keeps flair_tags and prepublication_review_report as inert, unused columns", async () => {
     const { seed } = await makePublishedPrimarySeed();
     const author = await makeAccount();

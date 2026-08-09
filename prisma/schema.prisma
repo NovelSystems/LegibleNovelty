@@ -498,6 +498,23 @@ enum SeedCommentStatus {
   dismissed
 }
 
+// Coarse authoring-effort/scope bucket for a Seed (Seed Editor schema pass).
+// Distinct from the free-text `lesson_size_scope` already on LearningSeed — this
+// is a structured enum for filtering/promotion; see the field comment for the
+// flagged overlap.
+enum CurriculumLoad {
+  worksheet
+  short_unit
+  extended_unit
+}
+
+// Difficulty tier for a Seed (Seed Editor schema pass).
+enum Complexity {
+  beginner
+  intermediate
+  advanced
+}
+
 // Two-level, grade-independent taxonomy (Subject → Topic only; a third level
 // was deliberately rejected). "Versioned so adding a Topic never breaks existing
 // seed placements": nodes have stable ids and are additive, and a Topic that
@@ -578,6 +595,22 @@ model LearningSeed {
   associated_commission_id String?
 
   notes  String // The sizeable, deliberately-unstructured catch-all.
+
+  // --- Seed Editor curriculum metadata (schema pass) -------------------------
+  // All nullable: a Seed saves as an incomplete draft; completeness is enforced
+  // at PROMOTION to a Module (see assertSeedPromotable in lib/modules.ts), not by
+  // schema constraints. `prerequisiteKnowledge` and `learningOutcome` from the
+  // spec are NOT new columns — they map to the existing required
+  // `entry_prerequisite` and `learning_objective` above.
+  curriculum_load CurriculumLoad? // Overlaps conceptually with lesson_size_scope (flagged for review).
+  complexity      Complexity?
+  // The Seed's substantive material — distinct from `notes` and from
+  // `algorithmic_constraints`. PROVISIONAL SHAPE: kept as a single plain-text
+  // column with no imposed structure on purpose; the internal structure is still
+  // pending research-team input (Prof. Rodriguez) and is expected to be revisited.
+  // A clearly-flagged reversible default, not a finished design.
+  content String?
+
   status SeedStatus @default(draft)
 
   published_at DateTime? // Set when status → published; drives the daily quota.

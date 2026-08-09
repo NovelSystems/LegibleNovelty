@@ -30,6 +30,9 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
+  "prisma": {
+    "seed": "node scripts/seed-subjects.mjs"
+  },
   "pnpm": {
     "overrides": {
       "brace-expansion@1": "^1.1.18",

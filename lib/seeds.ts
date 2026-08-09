@@ -76,6 +76,11 @@ export interface CreateSeedArgs {
   targetLearnerCharacteristics?: string;
   associatedCommissionId?: string; // Soft reference; unenforced.
   isEnrichment?: boolean;
+  // Seed Editor curriculum metadata — all optional so a draft can be saved
+  // incomplete; required only to PROMOTE the seed to a Module (assertSeedPromotable).
+  curriculumLoad?: Prisma.LearningSeedCreateInput["curriculum_load"];
+  complexity?: Prisma.LearningSeedCreateInput["complexity"];
+  content?: string;
 }
 
 export async function createSeedDraft(args: CreateSeedArgs) {
@@ -98,6 +103,9 @@ export async function createSeedDraft(args: CreateSeedArgs) {
       target_learner_characteristics: args.targetLearnerCharacteristics ?? null,
       associated_commission_id: args.associatedCommissionId ?? null,
       is_enrichment: args.isEnrichment ?? false,
+      curriculum_load: args.curriculumLoad ?? null,
+      complexity: args.complexity ?? null,
+      content: args.content ?? null,
       status: "draft",
     },
   });
