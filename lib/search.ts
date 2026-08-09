@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import type { AiAttestation, ContextualizedModule, Prisma } from "@prisma/client";
+import type { AiAttestation, Complexity, ContextualizedModule, Prisma } from "@prisma/client";
 
 // Library — Search, Ranking, and Discovery (master design Sections 9.3–9.7).
 //
@@ -86,11 +86,9 @@ export interface SearchFilters {
   language?: string;
   subjectId?: string;
   topicId?: string;
-  // Free-text grade filter. Seed Editor deliberately made grade_range free-text
-  // and non-sortable, so this is a SUBSTRING (contains) match, NOT a numeric
-  // range query — flagged in the delivery summary as worth revisiting now that
-  // filtering against this field is a real requirement.
-  gradeRange?: string;
+  // Difficulty filter on the primary seed's `complexity` enum. Replaces the old
+  // free-text grade_range filter (grade_range was dropped in favor of complexity).
+  complexity?: Complexity;
   // Context (special-interest) tag: multi-select, OR within (an IN check over the
   // single context_tag column), AND with every other filter.
   contextTags?: string[];
@@ -117,9 +115,7 @@ function buildWhere(filters: SearchFilters): Prisma.ContextualizedModuleWhereInp
   if (filters.language) seed.language = filters.language;
   if (filters.subjectId) seed.subject_id = filters.subjectId;
   if (filters.topicId) seed.topic_id = filters.topicId;
-  if (filters.gradeRange) {
-    seed.grade_range = { contains: filters.gradeRange, mode: "insensitive" };
-  }
+  if (filters.complexity) seed.complexity = filters.complexity;
 
   const where: Prisma.ContextualizedModuleWhereInput = { status: "published" };
   if (Object.keys(seed).length > 0) where.primary_seed = seed;

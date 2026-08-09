@@ -13,7 +13,6 @@ function seedContentSnapshot(seed: LearningSeed) {
     lesson_size_scope: seed.lesson_size_scope,
     subject_id: seed.subject_id,
     topic_id: seed.topic_id,
-    grade_range: seed.grade_range,
     notes: seed.notes,
     language: seed.language,
     algorithmic_constraints:
@@ -60,6 +59,35 @@ async function assertValidPlacement(subjectId: string, topicId: string) {
   }
 }
 
+// TEMPORARY (bootstrapping): let the Seed Editor create a Topic on the fly under
+// a Subject, so a single admin doesn't have to pre-populate every Topic in every
+// Subject before seeds can be placed. Find-or-create by (subject, trimmed name),
+// case-insensitively; auto-created Topics are approved. This is scaffolding while
+// the taxonomy is built out — once Topics are curated/proposal-gated, callers
+// should move to selecting an existing Topic instead of creating one here.
+export async function findOrCreateTopic(subjectId: string, rawName: string) {
+  const name = rawName.trim();
+  if (!name) throw new SeedError("Topic name cannot be empty.");
+  const subject = await prisma.taxonomy.findUnique({ where: { taxonomy_id: subjectId } });
+  if (!subject || subject.level !== "subject") {
+    throw new SeedError("subject_id must reference a Subject taxonomy node.");
+  }
+  if (subject.deprecated_at) {
+    throw new SeedError("Cannot create a Topic under a deprecated Subject.");
+  }
+  const existing = await prisma.taxonomy.findFirst({
+    where: {
+      level: "topic",
+      parent_id: subjectId,
+      name: { equals: name, mode: "insensitive" },
+    },
+  });
+  if (existing) return existing;
+  return prisma.taxonomy.create({
+    data: { level: "topic", name, parent_id: subjectId, approved: true },
+  });
+}
+
 // --- Create ------------------------------------------------------------------
 
 export interface CreateSeedArgs {
@@ -69,7 +97,6 @@ export interface CreateSeedArgs {
   lessonSizeScope: string;
   subjectId: string;
   topicId: string;
-  gradeRange: string;
   notes: string;
   language?: string;
   algorithmicConstraints?: Prisma.InputJsonValue;
@@ -96,7 +123,6 @@ export async function createSeedDraft(args: CreateSeedArgs) {
       lesson_size_scope: args.lessonSizeScope,
       subject_id: args.subjectId,
       topic_id: args.topicId,
-      grade_range: args.gradeRange,
       notes: args.notes,
       language: args.language ?? "en",
       algorithmic_constraints: args.algorithmicConstraints,
@@ -386,7 +412,6 @@ export interface SeedRevisionContent {
   lessonSizeScope: string;
   subjectId: string;
   topicId: string;
-  gradeRange: string;
   notes: string;
   language?: string;
   algorithmicConstraints?: Prisma.InputJsonValue;
@@ -446,7 +471,6 @@ export async function createSeedRevision(args: {
     lesson_size_scope: args.content.lessonSizeScope,
     subject_id: args.content.subjectId,
     topic_id: args.content.topicId,
-    grade_range: args.content.gradeRange,
     notes: args.content.notes,
     language: args.content.language ?? seed.language,
     algorithmic_constraints: args.content.algorithmicConstraints,

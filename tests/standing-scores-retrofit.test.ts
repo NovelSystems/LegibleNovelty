@@ -98,7 +98,6 @@ describe("Standing Scores retrofit into the Seed Editor + flag wiring", () => {
         lessonSizeScope: "single-session",
         subjectId: subject.taxonomy_id,
         topicId: topic.taxonomy_id,
-        gradeRange: "ages 8-10",
         notes: "",
       },
       editSummary: "Removed vandalism.",

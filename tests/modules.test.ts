@@ -108,9 +108,7 @@ describe("Module Editor — lifecycle, DSS lock, publication gate", () => {
       entryPrerequisite: "x",
       lessonSizeScope: "single-session",
       subjectId: bs.taxonomy_id,
-      topicId: bt.taxonomy_id,
-      gradeRange: "ages 8-10",
-      notes: "",
+      topicId: bt.taxonomy_id,      notes: "",
     });
     await submitSeed(bDraft.seed_id, bArch.account_id);
     await publishSeed(bDraft.seed_id, bArch.account_id);
@@ -182,9 +180,7 @@ describe("Module Editor — lifecycle, DSS lock, publication gate", () => {
       entryPrerequisite: "Can count to 100.",
       lessonSizeScope: "single-session",
       subjectId: subject.taxonomy_id,
-      topicId: topic.taxonomy_id,
-      gradeRange: "ages 8-10",
-      notes: "",
+      topicId: topic.taxonomy_id,      notes: "",
     });
     await submitSeed(seed.seed_id, architect.account_id);
     await publishSeed(seed.seed_id, architect.account_id);

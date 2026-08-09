@@ -118,7 +118,7 @@ checks](#running-the-checks)). All of it lives on a single unmerged branch — s
   → [`docs/briefs/Library_EndorsementRecommendation.md`](./docs/briefs/Library_EndorsementRecommendation.md)
 - ✅ **Library — Search, Ranking & Discovery** _(second Library sub-stage)_. The five sort modes and
   their formulas with the AI-attestation multiplier (`lib/search.ts`, reading the existing
-  `ai_attestation`), the full filter set (context tag, free-text-substring grade, subject/topic,
+  `ai_attestation`), the full filter set (context tag, complexity, subject/topic,
   language, binary endorsement status, attestation tier — combining Context OR-within / AND-across),
   the cascading-window homepage list (`lib/homepage.ts`: 2 weeks → 2 months → anytime, ranked by
   Weighted Approval, up to 20, static empty state), and the Quick Search backend helpers (cascading
@@ -209,10 +209,11 @@ confirmed; changing them is a decision, not a bug:
   22's broader reading is correct (Section 4.3 gives LNC-holders the same endorsement ability), so the
   live check is `ve_status || lnc_status`. `lnc_status` has no source until Certification Center ships,
   so the LNC path is currently unreachable but implemented and tested.
-- **Grade-level filter is a free-text SUBSTRING match, not a numeric range.** Seed Editor deliberately
-  made `grade_range` free-text/non-sortable; the Search sub-stage now needs to filter on it, so it
-  does a case-insensitive `contains` match. Worth revisiting whether that original non-sortable
-  decision should change now that filtering against the same field is a stated requirement.
+- **Difficulty filter uses the `complexity` enum (grade_range was dropped).** The Seed's free-text
+  `grade_range` was removed in favor of the structured `complexity` enum
+  (beginner/intermediate/advanced); the Library filter is now an exact enum match on the primary
+  seed's `complexity` (`lib/search.ts`). Note: the design doc / Seed Editor & Library briefs still
+  describe `grade_range` as a free-text field — those are historical spec and are now superseded here.
 - **AI-attestation multiplier for AI Pipeline / null attestation is 1×.** The doc gives 10×/2× for the
   two live tiers and "1×" for the deferred AI Pipeline tier; a NULL attestation is undefined. Both are
   treated as the neutral 1× (no boost). Adjust in `lib/search.ts:ATTESTATION_MULTIPLIER` if a different

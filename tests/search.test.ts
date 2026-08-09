@@ -45,7 +45,7 @@ async function makeEligible(createdAt = new Date("2020-01-01T00:00:00Z")) {
 interface ModuleOpts {
   attestation?: AiAttestation | null;
   contextTag?: string | null;
-  gradeRange?: string;
+  complexity?: "beginner" | "intermediate" | "advanced";
   language?: string;
   downloads?: number;
   passingCompletions?: number;
@@ -71,10 +71,10 @@ async function publishedModule(opts: ModuleOpts = {}) {
     topicId: tax.topic.taxonomy_id,
     language: opts.language,
   });
-  if (opts.gradeRange) {
+  if (opts.complexity) {
     await prisma.learningSeed.update({
       where: { seed_id: seed.seed_id },
-      data: { grade_range: opts.gradeRange },
+      data: { complexity: opts.complexity },
     });
   }
 
@@ -236,16 +236,15 @@ describe("Library — filters (Section 9.5)", () => {
     expect(ids(byAttest)).toEqual([inScope.module.module_id]);
   });
 
-  it("grade-level filter is a SUBSTRING match against free-text grade_range, not a numeric range", async () => {
-    const tag = `grade-${Math.random()}`;
-    const fifth = await publishedModule({ contextTag: tag, gradeRange: "around 5th grade, ages 10-11" });
-    const eighth = await publishedModule({ contextTag: tag, gradeRange: "8th grade" });
+  it("complexity filter is an exact enum match on the primary seed (replaces grade_range)", async () => {
+    const tag = `cx-${Math.random()}`;
+    const beginner = await publishedModule({ contextTag: tag, complexity: "beginner" });
+    const advanced = await publishedModule({ contextTag: tag, complexity: "advanced" });
 
-    const res = await searchModules({ contextTags: [tag], gradeRange: "5th grade" });
-    expect(ids(res)).toEqual([fifth.module.module_id]);
-    // Case-insensitive substring.
-    const res2 = await searchModules({ contextTags: [tag], gradeRange: "8TH GRADE" });
-    expect(ids(res2)).toEqual([eighth.module.module_id]);
+    const res = await searchModules({ contextTags: [tag], complexity: "beginner" });
+    expect(ids(res)).toEqual([beginner.module.module_id]);
+    const res2 = await searchModules({ contextTags: [tag], complexity: "advanced" });
+    expect(ids(res2)).toEqual([advanced.module.module_id]);
   });
 
   it("endorsement-status filter is binary on the primary seed (no threshold)", async () => {

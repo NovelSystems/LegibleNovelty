@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import {
   addDraftReviewComment,
   createSeedDraft,
+  findOrCreateTopic,
   deleteSeed,
   dismissComment,
   hasActiveDraftAccess,
@@ -25,6 +26,22 @@ describe("Seed Editor — schema, workflow, placement, quota", () => {
 
   // --- Task 1 schema / soft reference ---------------------------------------
 
+  it("findOrCreateTopic creates a Topic under a Subject on the fly, then reuses it (case-insensitive)", async () => {
+    const { subject } = await makeTaxonomyPair({ subject: `FOC-${Math.random()}` });
+    const created = await findOrCreateTopic(subject.taxonomy_id, "Long Division");
+    expect(created.level).toBe("topic");
+    expect(created.parent_id).toBe(subject.taxonomy_id);
+    // Reuse: same name (different case / whitespace) returns the same row, no dup.
+    const reused = await findOrCreateTopic(subject.taxonomy_id, "  long division ");
+    expect(reused.taxonomy_id).toBe(created.taxonomy_id);
+    const count = await prisma.taxonomy.count({
+      where: { level: "topic", parent_id: subject.taxonomy_id, name: { equals: "Long Division", mode: "insensitive" } },
+    });
+    expect(count).toBe(1);
+    // A non-Subject parent is rejected.
+    await expect(findOrCreateTopic(created.taxonomy_id, "Nested")).rejects.toBeInstanceOf(SeedError);
+  });
+
   it("creates a seed with no authoring gate and an unenforced commission soft reference", async () => {
     const architect = await makeAccount(); // Plain Community Member, no VE.
     const { subject, topic } = await makeTaxonomyPair();
@@ -36,7 +53,6 @@ describe("Seed Editor — schema, workflow, placement, quota", () => {
       lessonSizeScope: "single-session",
       subjectId: subject.taxonomy_id,
       topicId: topic.taxonomy_id,
-      gradeRange: "ages 8-10",
       notes: "free-form notes",
       algorithmicConstraints: { multiplier: [2, 9] }, // Loose JSON.
       associatedCommissionId: bogusCommissionId,

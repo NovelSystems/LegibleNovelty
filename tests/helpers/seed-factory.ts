@@ -37,7 +37,6 @@ export function draftSeed(opts: SeedFixtureOpts) {
     lessonSizeScope: "single-session",
     subjectId: opts.subjectId,
     topicId: opts.topicId,
-    gradeRange: "roughly ages 7-9",
     notes: "",
     language: opts.language,
     isEnrichment: opts.isEnrichment,

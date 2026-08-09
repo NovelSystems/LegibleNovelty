@@ -577,7 +577,6 @@ model LearningSeed {
   topic_id   String
   topic      Taxonomy @relation("SeedTopic", fields: [topic_id], references: [taxonomy_id])
 
-  grade_range                    String // Free-text, deliberately not sortable.
   target_learner_characteristics String? // Optional.
 
   // Content language, needed for the language-coverage query (Task 3). Not in
@@ -735,7 +734,6 @@ model SeedRevision {
   lesson_size_scope              String
   subject_id                     String
   topic_id                       String
-  grade_range                    String
   target_learner_characteristics String?
   language                       String
   notes                          String
