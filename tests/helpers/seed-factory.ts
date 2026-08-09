@@ -25,7 +25,10 @@ export interface SeedFixtureOpts {
   objective?: string;
 }
 
-// Create a draft with sensible defaults.
+// Create a draft with sensible defaults. Includes the curriculum-completeness
+// fields (curriculumLoad/complexity/content) so a seed built from this factory is
+// promotable to a Module — module tests promote via createModule, which now gates
+// on completeness.
 export function draftSeed(opts: SeedFixtureOpts) {
   return createSeedDraft({
     architectAccountId: opts.architectId,
@@ -34,10 +37,12 @@ export function draftSeed(opts: SeedFixtureOpts) {
     lessonSizeScope: "single-session",
     subjectId: opts.subjectId,
     topicId: opts.topicId,
-    gradeRange: "roughly ages 7-9",
     notes: "",
     language: opts.language,
     isEnrichment: opts.isEnrichment,
+    curriculumLoad: "worksheet",
+    complexity: "beginner",
+    content: "Worked examples and practice problems for single-digit multiplication.",
   });
 }
 

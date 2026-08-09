@@ -84,11 +84,42 @@ function contentSatisfies(moduleText: string, requirement: string): boolean {
 
 // --- create / secondary seeds ------------------------------------------------
 
+// A Seed may be saved as an incomplete draft; PROMOTION to a Module is the gate
+// where content-completeness is enforced — a check at the transition itself, the
+// same shape as the ai_attestation check in submitForReview, not a schema
+// constraint. `prerequisiteKnowledge`/`learningOutcome` from the Seed Editor spec
+// map to the seed's existing required `entry_prerequisite`/`learning_objective`.
+export function assertSeedPromotable(seed: {
+  subject_id: string | null;
+  topic_id: string | null;
+  curriculum_load: unknown;
+  complexity: unknown;
+  entry_prerequisite: string | null;
+  learning_objective: string | null;
+  content: string | null;
+}) {
+  const missing: string[] = [];
+  if (!seed.subject_id) missing.push("subject");
+  if (!seed.topic_id) missing.push("topic");
+  if (!seed.curriculum_load) missing.push("curriculumLoad");
+  if (!seed.complexity) missing.push("complexity");
+  if (!seed.entry_prerequisite?.trim()) missing.push("prerequisiteKnowledge");
+  if (!seed.learning_objective?.trim()) missing.push("learningOutcome");
+  if (!seed.content?.trim()) missing.push("content");
+  if (missing.length > 0) {
+    throw new ModuleError(
+      `Seed is not complete enough to promote to a module (missing: ${missing.join(", ")}).`,
+    );
+  }
+}
+
 export async function createModule(
   args: { authorAccountId: string; primarySeedId: string; aiAttestation?: Prisma.ContextualizedModuleCreateInput["ai_attestation"] },
   now: Date = new Date(),
 ) {
   await assertDssNotLocked(args.authorAccountId, now); // REUSE — same function.
+  const seed = await prisma.learningSeed.findUniqueOrThrow({ where: { seed_id: args.primarySeedId } });
+  assertSeedPromotable(seed); // Promotion gate: the seed must be content-complete.
   const rev = await latestSeedRevision(args.primarySeedId);
   return prisma.contextualizedModule.create({
     data: {

@@ -31,9 +31,7 @@ function contentFor(subjectId: string, topicId: string, objective: string) {
     entryPrerequisite: "prereq",
     lessonSizeScope: "single-session",
     subjectId,
-    topicId,
-    gradeRange: "ages 8-10",
-    notes: "",
+    topicId,    notes: "",
   };
 }
 
@@ -152,9 +150,7 @@ describe("SeedRevision — controlled-document edits", () => {
       entryPrerequisite: "y",
       lessonSizeScope: "single-session",
       subjectId: subject.taxonomy_id,
-      topicId: topic.taxonomy_id,
-      gradeRange: "ages 8-10",
-      notes: "",
+      topicId: topic.taxonomy_id,      notes: "",
     });
     await expect(
       createSeedRevision({

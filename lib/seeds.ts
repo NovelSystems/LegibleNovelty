@@ -13,7 +13,6 @@ function seedContentSnapshot(seed: LearningSeed) {
     lesson_size_scope: seed.lesson_size_scope,
     subject_id: seed.subject_id,
     topic_id: seed.topic_id,
-    grade_range: seed.grade_range,
     notes: seed.notes,
     language: seed.language,
     algorithmic_constraints:
@@ -60,22 +59,63 @@ async function assertValidPlacement(subjectId: string, topicId: string) {
   }
 }
 
+// TEMPORARY (bootstrapping): let the Seed Editor create a Topic on the fly under
+// a Subject, so a single admin doesn't have to pre-populate every Topic in every
+// Subject before seeds can be placed. Find-or-create by (subject, trimmed name),
+// case-insensitively; auto-created Topics are approved. This is scaffolding while
+// the taxonomy is built out — once Topics are curated/proposal-gated, callers
+// should move to selecting an existing Topic instead of creating one here.
+export async function findOrCreateTopic(subjectId: string, rawName: string) {
+  const name = rawName.trim();
+  if (!name) throw new SeedError("Topic name cannot be empty.");
+  const subject = await prisma.taxonomy.findUnique({ where: { taxonomy_id: subjectId } });
+  if (!subject || subject.level !== "subject") {
+    throw new SeedError("subject_id must reference a Subject taxonomy node.");
+  }
+  if (subject.deprecated_at) {
+    throw new SeedError("Cannot create a Topic under a deprecated Subject.");
+  }
+  const existing = await prisma.taxonomy.findFirst({
+    where: {
+      level: "topic",
+      parent_id: subjectId,
+      name: { equals: name, mode: "insensitive" },
+    },
+  });
+  if (existing) return existing;
+  return prisma.taxonomy.create({
+    data: { level: "topic", name, parent_id: subjectId, approved: true },
+  });
+}
+
 // --- Create ------------------------------------------------------------------
 
 export interface CreateSeedArgs {
   architectAccountId: string;
-  learningObjective: string;
-  entryPrerequisite: string;
-  lessonSizeScope: string;
+  // Save gate (Seed Editor): title + subjectId + topicId are the minimum to save
+  // a draft. subjectId/topicId are required by this signature; `title` is
+  // required by the editor's save action (optional here so the test factories and
+  // other flows can create untitled drafts). The remaining text fields are
+  // optional at draft time and default to "" when omitted.
+  title?: string;
+  learningObjective?: string;
+  entryPrerequisite?: string;
+  lessonSizeScope?: string;
   subjectId: string;
   topicId: string;
-  gradeRange: string;
-  notes: string;
+  notes?: string;
   language?: string;
   algorithmicConstraints?: Prisma.InputJsonValue;
   targetLearnerCharacteristics?: string;
   associatedCommissionId?: string; // Soft reference; unenforced.
   isEnrichment?: boolean;
+  // Seed Editor curriculum metadata — all optional so a draft can be saved
+  // incomplete; required only to PROMOTE the seed to a Module (assertSeedPromotable).
+  curriculumLoad?: Prisma.LearningSeedCreateInput["curriculum_load"];
+  complexity?: Prisma.LearningSeedCreateInput["complexity"];
+  content?: string;
+  // Structured curriculum-sequencing link — a prior seed of the SAME architect.
+  prerequisiteSeedId?: string | null;
 }
 
 export async function createSeedDraft(args: CreateSeedArgs) {
@@ -83,24 +123,158 @@ export async function createSeedDraft(args: CreateSeedArgs) {
   // seed authoring entirely — checked FIRST, independent of the publish quota.
   await assertDssNotLocked(args.architectAccountId);
   await assertValidPlacement(args.subjectId, args.topicId); // Self-placement.
+  if (args.prerequisiteSeedId) {
+    await assertOwnPrerequisite(args.prerequisiteSeedId, args.architectAccountId);
+  }
   return prisma.learningSeed.create({
     data: {
       architect_account_id: args.architectAccountId,
-      learning_objective: args.learningObjective,
-      entry_prerequisite: args.entryPrerequisite,
-      lesson_size_scope: args.lessonSizeScope,
+      title: args.title ?? null,
+      // Optional-at-draft text fields stay NOT NULL in the schema; an unfilled
+      // draft stores "" (treated as "missing" by the publish-completeness gate).
+      learning_objective: args.learningObjective ?? "",
+      entry_prerequisite: args.entryPrerequisite ?? "",
+      lesson_size_scope: args.lessonSizeScope ?? "",
       subject_id: args.subjectId,
       topic_id: args.topicId,
-      grade_range: args.gradeRange,
-      notes: args.notes,
+      notes: args.notes ?? "",
       language: args.language ?? "en",
       algorithmic_constraints: args.algorithmicConstraints,
       target_learner_characteristics: args.targetLearnerCharacteristics ?? null,
       associated_commission_id: args.associatedCommissionId ?? null,
       is_enrichment: args.isEnrichment ?? false,
+      curriculum_load: args.curriculumLoad ?? null,
+      complexity: args.complexity ?? null,
+      content: args.content ?? null,
+      prerequisite_seed_id: args.prerequisiteSeedId || null,
       status: "draft",
     },
   });
+}
+
+// Editable fields for an existing DRAFT. Anything left `undefined` is untouched;
+// an explicit value (including "") overwrites. Mirrors CreateSeedArgs' optional
+// fields — placement is only re-validated when subject or topic actually change.
+export interface UpdateSeedDraftArgs {
+  title?: string | null;
+  subjectId?: string;
+  topicId?: string;
+  learningObjective?: string;
+  entryPrerequisite?: string;
+  lessonSizeScope?: string;
+  notes?: string;
+  curriculumLoad?: Prisma.LearningSeedUpdateInput["curriculum_load"];
+  complexity?: Prisma.LearningSeedUpdateInput["complexity"];
+  content?: string | null;
+  targetLearnerCharacteristics?: string | null;
+  prerequisiteSeedId?: string | null;
+}
+
+// Seed Editor "Save" on an existing draft. Owner-only, draft-only (published /
+// pending_review seeds are not edited through this path — placement revisions on
+// a published seed go through reviseOwnPlacement, deliberately asymmetric).
+export async function updateSeedDraft(
+  seedId: string,
+  architectAccountId: string,
+  patch: UpdateSeedDraftArgs,
+) {
+  const seed = await loadSeedOwnedBy(seedId, architectAccountId);
+  if (seed.status !== "draft") {
+    throw new SeedError("Only a draft can be edited.");
+  }
+  if (patch.subjectId !== undefined || patch.topicId !== undefined) {
+    await assertValidPlacement(
+      patch.subjectId ?? seed.subject_id,
+      patch.topicId ?? seed.topic_id,
+    );
+  }
+  if (patch.prerequisiteSeedId) {
+    await assertOwnPrerequisite(patch.prerequisiteSeedId, architectAccountId, seedId);
+  }
+  return prisma.learningSeed.update({
+    where: { seed_id: seedId },
+    data: {
+      ...(patch.title !== undefined && { title: patch.title }),
+      ...(patch.subjectId !== undefined && { subject_id: patch.subjectId }),
+      ...(patch.topicId !== undefined && { topic_id: patch.topicId }),
+      ...(patch.learningObjective !== undefined && {
+        learning_objective: patch.learningObjective,
+      }),
+      ...(patch.entryPrerequisite !== undefined && {
+        entry_prerequisite: patch.entryPrerequisite,
+      }),
+      ...(patch.lessonSizeScope !== undefined && {
+        lesson_size_scope: patch.lessonSizeScope,
+      }),
+      ...(patch.notes !== undefined && { notes: patch.notes }),
+      ...(patch.curriculumLoad !== undefined && {
+        curriculum_load: patch.curriculumLoad,
+      }),
+      ...(patch.complexity !== undefined && { complexity: patch.complexity }),
+      ...(patch.content !== undefined && { content: patch.content }),
+      ...(patch.targetLearnerCharacteristics !== undefined && {
+        target_learner_characteristics: patch.targetLearnerCharacteristics,
+      }),
+      ...(patch.prerequisiteSeedId !== undefined && {
+        // "" from the picker's "clear" action normalizes to null (no FK).
+        prerequisite_seed_id: patch.prerequisiteSeedId || null,
+      }),
+    },
+  });
+}
+
+// Completeness gate for PUBLISH from the Seed Editor. Mirrors the module
+// promotion gate (assertSeedPromotable in lib/modules.ts) field-for-field, plus
+// `title` — a publishable seed is a complete one. lesson_size_scope, notes and
+// target_learner_characteristics remain optional even at publish. "" counts as
+// missing (drafts store "" for unfilled text), hence the `.trim()` checks.
+export function assertSeedComplete(seed: {
+  title: string | null;
+  subject_id: string | null;
+  topic_id: string | null;
+  curriculum_load: unknown;
+  complexity: unknown;
+  entry_prerequisite: string | null;
+  learning_objective: string | null;
+  content: string | null;
+}) {
+  const missing: string[] = [];
+  if (!seed.title?.trim()) missing.push("title");
+  if (!seed.subject_id) missing.push("subject");
+  if (!seed.topic_id) missing.push("topic");
+  if (!seed.curriculum_load) missing.push("curriculumLoad");
+  if (!seed.complexity) missing.push("complexity");
+  if (!seed.entry_prerequisite?.trim()) missing.push("prerequisiteKnowledge");
+  if (!seed.learning_objective?.trim()) missing.push("learningOutcome");
+  if (!seed.content?.trim()) missing.push("content");
+  if (missing.length > 0) {
+    throw new SeedError(
+      `Seed is not complete enough to publish (missing: ${missing.join(", ")}).`,
+    );
+  }
+}
+
+// The structured prerequisite link is scoped to the architect's OWN seeds
+// (search-only in the picker; enforced here as defense-in-depth), and a seed
+// cannot be its own prerequisite.
+async function assertOwnPrerequisite(
+  prerequisiteSeedId: string,
+  architectAccountId: string,
+  selfSeedId?: string,
+) {
+  if (selfSeedId && prerequisiteSeedId === selfSeedId) {
+    throw new SeedError("A seed cannot be its own prerequisite.");
+  }
+  const prereq = await prisma.learningSeed.findUnique({
+    where: { seed_id: prerequisiteSeedId },
+  });
+  if (
+    !prereq ||
+    prereq.deleted_at ||
+    prereq.architect_account_id !== architectAccountId
+  ) {
+    throw new SeedError("The prerequisite seed must be one of your own seeds.");
+  }
 }
 
 async function loadSeedOwnedBy(seedId: string, architectAccountId: string) {
@@ -289,6 +463,30 @@ export async function publishSeed(
   });
 }
 
+// The Seed Editor's single "Publish" button: draft → published in one action,
+// gated on CONTENT COMPLETENESS (which the low-level lifecycle deliberately does
+// not check — the promote-to-module button that used to live here was dropped
+// because promotion needs a published revision a draft doesn't have). Reuses the
+// existing draft→pending_review→published lifecycle so invite-revocation, the
+// DSS/quota checks and the baseline revision each happen exactly once.
+// Completeness, DSS and quota are pre-checked so a blocked publish leaves the
+// seed a Draft rather than stranded in pending_review.
+export async function publishDraft(
+  seedId: string,
+  architectAccountId: string,
+  now: Date = new Date(),
+) {
+  const seed = await loadSeedOwnedBy(seedId, architectAccountId);
+  if (seed.status !== "draft") {
+    throw new SeedError("Only a draft can be published from the editor.");
+  }
+  assertSeedComplete(seed);
+  await assertDssNotLocked(architectAccountId, now);
+  await assertCanPublish(architectAccountId, now);
+  await submitForReview(seedId, architectAccountId);
+  return publishSeed(seedId, architectAccountId, now);
+}
+
 // Soft delete (same convention as Stage 1's Account). A published seed's slot is
 // freed immediately for the concurrent cap, without losing the row.
 export async function deleteSeed(seedId: string, architectAccountId: string) {
@@ -378,7 +576,6 @@ export interface SeedRevisionContent {
   lessonSizeScope: string;
   subjectId: string;
   topicId: string;
-  gradeRange: string;
   notes: string;
   language?: string;
   algorithmicConstraints?: Prisma.InputJsonValue;
@@ -438,7 +635,6 @@ export async function createSeedRevision(args: {
     lesson_size_scope: args.content.lessonSizeScope,
     subject_id: args.content.subjectId,
     topic_id: args.content.topicId,
-    grade_range: args.content.gradeRange,
     notes: args.content.notes,
     language: args.content.language ?? seed.language,
     algorithmic_constraints: args.content.algorithmicConstraints,

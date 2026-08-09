@@ -118,7 +118,7 @@ checks](#running-the-checks)). All of it lives on a single unmerged branch — s
   → [`docs/briefs/Library_EndorsementRecommendation.md`](./docs/briefs/Library_EndorsementRecommendation.md)
 - ✅ **Library — Search, Ranking & Discovery** _(second Library sub-stage)_. The five sort modes and
   their formulas with the AI-attestation multiplier (`lib/search.ts`, reading the existing
-  `ai_attestation`), the full filter set (context tag, free-text-substring grade, subject/topic,
+  `ai_attestation`), the full filter set (context tag, complexity, subject/topic,
   language, binary endorsement status, attestation tier — combining Context OR-within / AND-across),
   the cascading-window homepage list (`lib/homepage.ts`: 2 weeks → 2 months → anytime, ranked by
   Weighted Approval, up to 20, static empty state), and the Quick Search backend helpers (cascading
@@ -209,29 +209,24 @@ confirmed; changing them is a decision, not a bug:
   22's broader reading is correct (Section 4.3 gives LNC-holders the same endorsement ability), so the
   live check is `ve_status || lnc_status`. `lnc_status` has no source until Certification Center ships,
   so the LNC path is currently unreachable but implemented and tested.
-- **Grade-level filter is a free-text SUBSTRING match, not a numeric range.** Seed Editor deliberately
-  made `grade_range` free-text/non-sortable; the Search sub-stage now needs to filter on it, so it
-  does a case-insensitive `contains` match. Worth revisiting whether that original non-sortable
-  decision should change now that filtering against the same field is a stated requirement.
-- **AI-attestation multiplier for AI Pipeline is 1×.** The doc gives 10×/2× for the two live tiers and
-  "1×" for the deferred AI Pipeline tier. Adjust in `lib/search.ts:ATTESTATION_MULTIPLIER` if a
-  different call is made. (A NULL attestation also floors at 1× defensively, but it no longer reaches
-  ranking — see the resolved gap below.)
-- **RESOLVED — AI-attestation is now enforced at submission.** Section 9.4 requires a declaration
-  "before the system accepts it"; `submitForReview` (Module Editor) now rejects the draft →
-  pending-review transition when `ai_attestation` is null, and the
-  `20260803150000_backfill_null_ai_attestation` migration normalized any pre-enforcement
-  submitted/published rows to `ai_pipeline` (1×, the lowest multiplier — chosen because it exactly
-  matches the 1× the ranking code already applied to a null, so those rows gain no advantage; 2×/10×
-  would have handed them a boost). **The column stays nullable, deliberately:** a Draft legitimately
-  has no declaration until it reaches the submission gate, so `null` is the correct state for a Draft
-  and only for a Draft (Drafts are never ranked — search and homepage both filter `status =
-  published`). Making it `NOT NULL` would force a value at draft-creation, before the author has
-  declared, or require a fabricated default — so enforcement lives at the state transition, matching
-  how the branch gates other lifecycle requirements, not at the column. One caveat: `ai_pipeline`
-  permanently locks (`setAiAttestation` won't change away from it), so a backfilled legacy row can't
-  later be re-declared to its true tier; acceptable for the undeclared/dev rows this touches, flagged
-  in case real pre-enforcement content ever needs it.
+- **Difficulty filter uses the `complexity` enum (grade_range was dropped).** The Seed's free-text
+  `grade_range` was removed in favor of the structured `complexity` enum
+  (beginner/intermediate/advanced); the Library filter is now an exact enum match on the primary
+  seed's `complexity` (`lib/search.ts`). Note: the design doc / Seed Editor & Library briefs still
+  describe `grade_range` as a free-text field — those are historical spec and are now superseded here.
+- **AI-attestation multiplier for AI Pipeline / null attestation is 1×.** The doc gives 10×/2× for the
+  two live tiers and "1×" for the deferred AI Pipeline tier; a NULL attestation is undefined. Both are
+  treated as the neutral 1× (no boost). Adjust in `lib/search.ts:ATTESTATION_MULTIPLIER` if a different
+  call is made.
+- **GAP — module submission does not enforce the AI-attestation declaration.** Section 9.4 says "a
+  Module Author must declare the generation profile ... before the system accepts it", but
+  `ContextualizedModule.ai_attestation` is nullable and neither `submitForReview` nor `publishModule`
+  (Module Editor) requires it to be set — so a published module can genuinely reach ranking with no
+  attestation. This is a Module Editor enforcement gap, surfaced (not papered over) by the ranking
+  multiplier's null handling above; ranking treats the missing declaration as the neutral 1× floor so
+  an undeclared module can't gain the multiplier, but that is a safe default, not a fix for the missing
+  enforcement. Closing it (require attestation at submit/publish, and decide whether existing null rows
+  need backfill) is a Module Editor change, left for confirmation rather than made here unprompted.
 - **`context_tag` / `download_count` / `passing_completion_count` are retroactive `ContextualizedModule`
   additions** the Search sub-stage makes, not in Module Editor's original field list — same category as
   Seed Editor's `language`/`published_at` additions. `download_count` and `passing_completion_count`
