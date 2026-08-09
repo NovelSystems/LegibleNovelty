@@ -403,7 +403,7 @@ up — rebuild with `docker compose down -v` and bring the environment back up.
 ├── lib/                     # Service layer — one module per feature area (see below)
 ├── prisma/
 │   ├── schema.prisma        # Full schema: User Management + Seed/Module/Lesson + Standing Scores + Library
-│   └── migrations/          # Committed migration history (11 migrations, additive)
+│   └── migrations/          # Committed migration history (12 migrations, additive + one data-fix)
 ├── db/init/                 # Postgres init (shadow + test databases, UTF-8)
 ├── tests/                   # Vitest: auth, lifecycle, seeds, modules, lesson plans, governance, …
 ├── docs/                    # Authoritative specs: LN_Webapp_Design + per-stage briefs/
