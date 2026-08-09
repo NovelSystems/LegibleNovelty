@@ -27,8 +27,9 @@ export interface SeedFixtureOpts {
 
 // Create a draft with sensible defaults. Includes the curriculum-completeness
 // fields (curriculumLoad/complexity/content) so a seed built from this factory is
-// promotable to a Module — module tests promote via createModule, which now gates
-// on completeness.
+// a complete, publishable seed (assertSeedComplete). createModule itself no
+// longer gates on seed completeness, but keeping these set matches how a real
+// authored seed reaches publication.
 export function draftSeed(opts: SeedFixtureOpts) {
   return createSeedDraft({
     architectAccountId: opts.architectId,
