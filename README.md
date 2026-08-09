@@ -15,8 +15,9 @@ anchored to a concrete objective underneath.
 > **Status:** early build. The design is fully resolved at the specification level. The code
 > covers **Stage 0 and 1, all three Workshop sub-stages (Seed Editor, Module Editor, Lesson
 > Planner), the cross-cutting Standing Scores system, and the first two Library sub-stages
-> (Endorsement & Community Recommendation; Search, Ranking & Discovery)** — all on a single unmerged
-> branch. Endorsement & Recommendation closed more forward-built stubs than any prior sub-stage — it
+> (Endorsement & Community Recommendation; Search, Ranking & Discovery)** — all **merged to `main`**,
+> with the frontend build phase now underway (the design-token system and the first Seed Editor UI
+> screen have landed too). Endorsement & Recommendation closed more forward-built stubs than any prior sub-stage — it
 > is what finally sets `Account.first_seed_endorsement_received`, wires the previously-dormant
 > endorsement/recommendation Standing Score triggers, and resolves the module "public section"
 > visibility question. Search/Ranking/Discovery then builds the sort/filter/homepage/quick-search
@@ -70,7 +71,7 @@ is the authoritative source for overall product behaviour.
 ### What exists today
 
 Everything below is **complete and tested against a fresh database** (see [Running the
-checks](#running-the-checks)). All of it lives on a single unmerged branch — see
+checks](#running-the-checks)) and **merged to `main`** — see
 [Branch and PR state](#branch-and-pr-state).
 
 - ✅ **Stage 0 — Infrastructure substrate.** The local, zero-cost Docker environment (PostgreSQL,
@@ -127,13 +128,32 @@ checks](#running-the-checks)). All of it lives on a single unmerged branch — s
   and tested against stubbed download/completion counts (nothing populates them until PDF Generation
   and Quiz/Scoring land).
   → [`docs/briefs/Library_SearchRankingDiscovery.md`](./docs/briefs/Library_SearchRankingDiscovery.md)
+- ✅ **Frontend foundation & Seed Editor UI** _(UI build phase — first screen; no single brief)_. The
+  design-token system in `app/globals.css` (Tailwind v4 CSS-first `@theme`): **Atkinson Hyperlegible**
+  for all interface text and **Lora** for module content, both self-hosted via `next/font/local`, plus
+  the logo-derived **teal / gold / sage** palette over WCAG-AA-tuned neutrals. **The brand hexes are
+  provisional** — derived from a logo _render_, not pixel-sampled from a source file, and no logo
+  (PNG/SVG) is committed to the repo yet, so the palette stays refineable rather than final. A
+  **shadcn/ui** integration wired to those tokens rather than shadcn's own defaults (`components.json`,
+  `lib/utils.ts`, and `components/ui/` — Button, Popover, Command, and a shared Combobox built on
+  `@radix-ui/react-popover` + `cmdk`), and a `/style-guide` proof page exercising the full token set.
+  The Seed Editor screen itself lives under **`/seeds`** — the author's own seed list (`/seeds`),
+  **create** (`/seeds/new`), and **edit** (`/seeds/[seedId]/edit`) — with a title+subject+topic save
+  gate and a completeness-gated Publish. Adds the structured **prerequisite-seed link**
+  (`LearningSeed.prerequisite_seed_id`: a nullable self-referential FK, authored through an own-seeds
+  combobox; the reverse "what comes next" traversal it enables is deferred, only the relationship
+  ships now).
 
 ### Branch and PR state
 
-**All of the above lives on one feature branch (`claude/legible-novelty-stage-1-6u9tfw`) and has
-not been merged.** There is no PR open and nothing has landed on the default branch yet. "Complete"
-here means built, migrated, and passing `scripts/check.sh` on that branch — not released. Treat the
-branch as the source of truth for current state; do not assume any of this is on `main`.
+**All of the above is merged to `main`**, the default branch — `main` is the source of truth for
+current state. Work is done on short-lived feature branches, each validated with `scripts/check.sh`
+and merged via pull request; there is no long-lived "active" branch, and nothing above is pending on
+one. (An earlier revision of this section named an unmerged branch
+`claude/legible-novelty-stage-1-6u9tfw` as the source of truth — that branch was merged and has since
+been deleted; the claim was stale.) "Complete" here means built, migrated, and passing
+`scripts/check.sh` on `main` — not released; production hosting is still deferred (see [Tech
+stack](#tech-stack)).
 
 ### What's explicitly deferred, and why it matters here
 
@@ -216,17 +236,18 @@ confirmed; changing them is a decision, not a bug:
   describe `grade_range` as a free-text field — those are historical spec and are now superseded here.
 - **AI-attestation multiplier for AI Pipeline / null attestation is 1×.** The doc gives 10×/2× for the
   two live tiers and "1×" for the deferred AI Pipeline tier; a NULL attestation is undefined. Both are
-  treated as the neutral 1× (no boost). Adjust in `lib/search.ts:ATTESTATION_MULTIPLIER` if a different
-  call is made.
-- **GAP — module submission does not enforce the AI-attestation declaration.** Section 9.4 says "a
-  Module Author must declare the generation profile ... before the system accepts it", but
-  `ContextualizedModule.ai_attestation` is nullable and neither `submitForReview` nor `publishModule`
-  (Module Editor) requires it to be set — so a published module can genuinely reach ranking with no
-  attestation. This is a Module Editor enforcement gap, surfaced (not papered over) by the ranking
-  multiplier's null handling above; ranking treats the missing declaration as the neutral 1× floor so
-  an undeclared module can't gain the multiplier, but that is a safe default, not a fix for the missing
-  enforcement. Closing it (require attestation at submit/publish, and decide whether existing null rows
-  need backfill) is a Module Editor change, left for confirmation rather than made here unprompted.
+  treated as the neutral 1× (no boost). With submission now enforcing a declared attestation (see the
+  resolved note below), a published-and-ranked module can no longer be null in practice — the 1× null
+  path is a defensive floor for any legacy row, not an expected state. Adjust in
+  `lib/search.ts:ATTESTATION_MULTIPLIER` if a different call is made.
+- **AI-attestation enforcement at module submission (resolved).** An earlier revision listed this as a
+  GAP — that `ContextualizedModule.ai_attestation` was nullable and nothing required it, so a module
+  could reach ranking undeclared. It is now enforced: the module's `submitForReview`
+  (`lib/modules.ts`) rejects a null `ai_attestation` at the draft→pending_review transition, and
+  pre-enforcement rows were backfilled to the least-advantageous `ai_pipeline` tier (the
+  `backfill_null_ai_attestation` migrations). Covered by a passing test ("rejects submission when
+  ai_attestation is undeclared, and accepts it once declared"). The column stays nullable on purpose
+  so in-progress drafts (excluded from ranking) can be undeclared.
 - **`context_tag` / `download_count` / `passing_completion_count` are retroactive `ContextualizedModule`
   additions** the Search sub-stage makes, not in Module Editor's original field list — same category as
   Seed Editor's `language`/`published_at` additions. `download_count` and `passing_completion_count`
@@ -318,7 +339,7 @@ Brief callouts; the real detail lives in the referenced files.
 | Concern | Stage 0 (local, now) | Production target (deferred) |
 |---|---|---|
 | Runtime | Node.js 24 (Active LTS), pnpm 9 via Corepack | same |
-| Framework | Next.js 15 (App Router), React 19 | same |
+| Framework | Next.js 16 (App Router), React 19, Tailwind CSS v4 + shadcn/ui | same |
 | Auth | Auth.js — **database sessions**, `@auth/prisma-adapter` | same, session store stays PostgreSQL (Redis path left open) |
 | ORM / DB | Prisma → PostgreSQL 17 (Docker), UTF-8 | Prisma → managed PostgreSQL, UTF-8 |
 | Email | **Mailpit** local catcher (SMTP + REST API) | Resend, via the Auth.js email adapter — a config swap, not new code |
@@ -403,7 +424,7 @@ up — rebuild with `docker compose down -v` and bring the environment back up.
 ├── lib/                     # Service layer — one module per feature area (see below)
 ├── prisma/
 │   ├── schema.prisma        # Full schema: User Management + Seed/Module/Lesson + Standing Scores + Library
-│   └── migrations/          # Committed migration history (12 migrations, additive + one data-fix)
+│   └── migrations/          # Committed migration history (17 migrations: additive schema growth, two null-attestation backfills, one column drop)
 ├── db/init/                 # Postgres init (shadow + test databases, UTF-8)
 ├── tests/                   # Vitest: auth, lifecycle, seeds, modules, lesson plans, governance, …
 ├── docs/                    # Authoritative specs: LN_Webapp_Design + per-stage briefs/
@@ -443,8 +464,7 @@ Also used: `SHADOW_DATABASE_URL` (for `prisma migrate dev`), `AUTH_SECRET` / `AU
 ## Contributing
 
 Work happens on feature branches and is validated with `./scripts/check.sh` before merge — no
-external accounts or services are needed to run the full check locally. The repository is
-currently private.
+external accounts or services are needed to run the full check locally. The repository is public.
 
 ## License
 
