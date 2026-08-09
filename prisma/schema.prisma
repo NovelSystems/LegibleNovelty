@@ -564,6 +564,15 @@ model LearningSeed {
   architect_account_id String
   architect            Account @relation(fields: [architect_account_id], references: [account_id])
 
+  // Short, memorable name for the seed (Seed Editor screen). Nullable at the
+  // column level so existing/other-flow drafts (and the test factories) need no
+  // title, but the Seed Editor's SAVE gate requires it together with subject and
+  // topic (enforced in the editor's server action, not by a DB constraint) — the
+  // same app-enforced-not-column-enforced pattern as the curriculum metadata
+  // below. NOT snapshotted onto SeedRevision, matching curriculum_load/
+  // complexity/content, which the publish-time snapshot also omits.
+  title String?
+
   learning_objective      String
   entry_prerequisite      String
   // GENUINELY UNRESOLVED shape (Open Items) — only ever illustrated for Math.
