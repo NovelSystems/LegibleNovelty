@@ -19,7 +19,7 @@ export default async function EditSeedPage({
 
   const seed = await prisma.learningSeed.findUnique({
     where: { seed_id: seedId },
-    include: { topic: true },
+    include: { topic: true, prerequisite_seed: { select: { title: true } } },
   });
   // Owner-only, and never a soft-deleted seed. A stranger or missing seed 404s
   // rather than leaking existence.
@@ -40,7 +40,13 @@ export default async function EditSeedPage({
     complexity: (seed.complexity ?? "") as SeedEditorInput["complexity"],
     content: seed.content ?? "",
     notes: seed.notes,
+    prerequisiteSeedId: seed.prerequisite_seed_id ?? "",
   };
+  // Display label for a pre-selected prerequisite (its combobox item may not be
+  // loaded until the picker opens).
+  const prereqLabel = seed.prerequisite_seed
+    ? seed.prerequisite_seed.title?.trim() || "Untitled draft"
+    : "";
 
   return (
     <SeedEditor
@@ -48,6 +54,7 @@ export default async function EditSeedPage({
       initial={initial}
       architectName={session.user?.name ?? "You"}
       status={seed.status}
+      prerequisiteInitialLabel={prereqLabel}
     />
   );
 }

@@ -19,7 +19,14 @@ export interface SeedEditorInput {
   complexity: "" | Complexity;
   content: string;
   notes: string;
+  // Structured curriculum-sequencing link. "" = no prerequisite. Stored as
+  // prerequisite_seed_id; scoped to the author's own seeds.
+  prerequisiteSeedId: string;
 }
+
+// A generic option for a combobox (value + human label). Structurally identical
+// to the ui Combobox's own ComboItem, so action results drop straight in.
+export type ComboItem = { value: string; label: string };
 
 export type SeedActionResult =
   | { ok: true; seedId: string; published?: boolean }

@@ -619,6 +619,20 @@ model LearningSeed {
   // A clearly-flagged reversible default, not a finished design.
   content String?
 
+  // --- Structured curriculum-sequencing link (Seed Editor pass) --------------
+  // The specific PRIOR seed that covers this seed's immediately-preceding topic.
+  // Nullable, self-referential, ALWAYS optional — distinct from the free-text
+  // `entry_prerequisite` above (a description of assumed knowledge); this is one
+  // concrete stored relationship. The authoring picker is scoped to the author's
+  // OWN seeds (search-only, no create). The REVERSE direction — a "what comes
+  // next" view for a learner who finished a seed, found by querying which seeds
+  // name THIS one as their prerequisite (`dependent_seeds`) — is deferred
+  // Module/Library work and is NOT built in this pass; only the relationship
+  // itself ships now so that future view has something real to query.
+  prerequisite_seed_id String?
+  prerequisite_seed    LearningSeed?  @relation("SeedPrerequisite", fields: [prerequisite_seed_id], references: [seed_id])
+  dependent_seeds      LearningSeed[] @relation("SeedPrerequisite")
+
   status SeedStatus @default(draft)
 
   published_at DateTime? // Set when status → published; drives the daily quota.
@@ -643,6 +657,9 @@ model LearningSeed {
   @@index([status])
   // Composite index for the two hot quota queries (concurrent + daily).
   @@index([architect_account_id, status, published_at])
+  // Supports the deferred reverse "what comes next" query (find seeds whose
+  // prerequisite_seed_id points at a given seed).
+  @@index([prerequisite_seed_id])
 }
 
 // A directed Seed Chain edge (Section 6.4): Seed A → Seed B, within a Topic.

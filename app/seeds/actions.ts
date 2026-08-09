@@ -1,6 +1,7 @@
 "use server";
 
 import { auth } from "@/auth";
+import { prisma } from "@/lib/prisma";
 import {
   createSeedDraft,
   updateSeedDraft,
@@ -8,7 +9,7 @@ import {
   findOrCreateTopic,
   SeedError,
 } from "@/lib/seeds";
-import type { SeedEditorInput, SeedActionResult } from "./types";
+import type { SeedEditorInput, SeedActionResult, ComboItem } from "./types";
 
 // Server actions for the Seed Editor. The domain rules (save gate, placement
 // validation, publish-completeness, quota) all live in lib/seeds.ts; these only
@@ -51,6 +52,7 @@ async function persistDraft(
       curriculumLoad,
       complexity,
       content: input.content,
+      prerequisiteSeedId: input.prerequisiteSeedId || null,
     });
     return updated.seed_id;
   }
@@ -66,6 +68,7 @@ async function persistDraft(
     curriculumLoad,
     complexity,
     content: input.content,
+    prerequisiteSeedId: input.prerequisiteSeedId || null,
   });
   return created.seed_id;
 }
@@ -85,6 +88,48 @@ export async function saveDraftAction(
   } catch (e) {
     return toError(e, "Could not save the seed.");
   }
+}
+
+// Existing Topics under a Subject, for the Topic combobox. Names are unique per
+// subject (findOrCreateTopic is case-insensitive), so the NAME is the value —
+// consistent with the create-on-the-fly path that resolves a name to a Topic id.
+export async function listSubjectTopicsAction(
+  subjectId: string,
+): Promise<ComboItem[]> {
+  if (!subjectId) return [];
+  const rows = await prisma.taxonomy.findMany({
+    where: { level: "topic", parent_id: subjectId, deprecated_at: null },
+    orderBy: { name: "asc" },
+    select: { name: true },
+  });
+  return rows.map((r) => ({ value: r.name, label: r.name }));
+}
+
+// Search the CURRENT author's own seeds for the Prerequisite combobox
+// (search-only, no create, scoped to own work). Excludes soft-deleted seeds and
+// the seed being edited (a seed can't be its own prerequisite).
+export async function searchOwnSeedsAction(
+  query: string,
+  excludeSeedId?: string,
+): Promise<ComboItem[]> {
+  const accountId = await currentAccountId();
+  if (!accountId) return [];
+  const q = query.trim();
+  const rows = await prisma.learningSeed.findMany({
+    where: {
+      architect_account_id: accountId,
+      deleted_at: null,
+      ...(excludeSeedId ? { seed_id: { not: excludeSeedId } } : {}),
+      ...(q ? { title: { contains: q, mode: "insensitive" } } : {}),
+    },
+    orderBy: { updated_at: "desc" },
+    take: 20,
+    select: { seed_id: true, title: true },
+  });
+  return rows.map((r) => ({
+    value: r.seed_id,
+    label: r.title?.trim() || "Untitled draft",
+  }));
 }
 
 export async function publishSeedAction(

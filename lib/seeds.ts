@@ -114,6 +114,8 @@ export interface CreateSeedArgs {
   curriculumLoad?: Prisma.LearningSeedCreateInput["curriculum_load"];
   complexity?: Prisma.LearningSeedCreateInput["complexity"];
   content?: string;
+  // Structured curriculum-sequencing link — a prior seed of the SAME architect.
+  prerequisiteSeedId?: string | null;
 }
 
 export async function createSeedDraft(args: CreateSeedArgs) {
@@ -121,6 +123,9 @@ export async function createSeedDraft(args: CreateSeedArgs) {
   // seed authoring entirely — checked FIRST, independent of the publish quota.
   await assertDssNotLocked(args.architectAccountId);
   await assertValidPlacement(args.subjectId, args.topicId); // Self-placement.
+  if (args.prerequisiteSeedId) {
+    await assertOwnPrerequisite(args.prerequisiteSeedId, args.architectAccountId);
+  }
   return prisma.learningSeed.create({
     data: {
       architect_account_id: args.architectAccountId,
@@ -141,6 +146,7 @@ export async function createSeedDraft(args: CreateSeedArgs) {
       curriculum_load: args.curriculumLoad ?? null,
       complexity: args.complexity ?? null,
       content: args.content ?? null,
+      prerequisite_seed_id: args.prerequisiteSeedId || null,
       status: "draft",
     },
   });
@@ -161,6 +167,7 @@ export interface UpdateSeedDraftArgs {
   complexity?: Prisma.LearningSeedUpdateInput["complexity"];
   content?: string | null;
   targetLearnerCharacteristics?: string | null;
+  prerequisiteSeedId?: string | null;
 }
 
 // Seed Editor "Save" on an existing draft. Owner-only, draft-only (published /
@@ -180,6 +187,9 @@ export async function updateSeedDraft(
       patch.subjectId ?? seed.subject_id,
       patch.topicId ?? seed.topic_id,
     );
+  }
+  if (patch.prerequisiteSeedId) {
+    await assertOwnPrerequisite(patch.prerequisiteSeedId, architectAccountId, seedId);
   }
   return prisma.learningSeed.update({
     where: { seed_id: seedId },
@@ -204,6 +214,10 @@ export async function updateSeedDraft(
       ...(patch.content !== undefined && { content: patch.content }),
       ...(patch.targetLearnerCharacteristics !== undefined && {
         target_learner_characteristics: patch.targetLearnerCharacteristics,
+      }),
+      ...(patch.prerequisiteSeedId !== undefined && {
+        // "" from the picker's "clear" action normalizes to null (no FK).
+        prerequisite_seed_id: patch.prerequisiteSeedId || null,
       }),
     },
   });
@@ -237,6 +251,29 @@ export function assertSeedComplete(seed: {
     throw new SeedError(
       `Seed is not complete enough to publish (missing: ${missing.join(", ")}).`,
     );
+  }
+}
+
+// The structured prerequisite link is scoped to the architect's OWN seeds
+// (search-only in the picker; enforced here as defense-in-depth), and a seed
+// cannot be its own prerequisite.
+async function assertOwnPrerequisite(
+  prerequisiteSeedId: string,
+  architectAccountId: string,
+  selfSeedId?: string,
+) {
+  if (selfSeedId && prerequisiteSeedId === selfSeedId) {
+    throw new SeedError("A seed cannot be its own prerequisite.");
+  }
+  const prereq = await prisma.learningSeed.findUnique({
+    where: { seed_id: prerequisiteSeedId },
+  });
+  if (
+    !prereq ||
+    prereq.deleted_at ||
+    prereq.architect_account_id !== architectAccountId
+  ) {
+    throw new SeedError("The prerequisite seed must be one of your own seeds.");
   }
 }
 

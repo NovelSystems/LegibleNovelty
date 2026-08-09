@@ -1,14 +1,21 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { saveDraftAction, publishSeedAction } from "@/app/seeds/actions";
+import {
+  saveDraftAction,
+  publishSeedAction,
+  listSubjectTopicsAction,
+  searchOwnSeedsAction,
+} from "@/app/seeds/actions";
 import type {
   SeedEditorInput,
   SubjectOption,
   CurriculumLoad,
   Complexity,
+  ComboItem,
 } from "@/app/seeds/types";
+import { Combobox } from "@/components/ui/combobox";
 
 // The Seed Editor screen. A focused authoring form: the brief is explicit that
 // the field list should SHRINK, so this intentionally omits the source
@@ -46,20 +53,57 @@ export function SeedEditor({
   initial,
   architectName,
   status,
+  prerequisiteInitialLabel = "",
 }: {
   subjects: SubjectOption[];
   initial: SeedEditorInput;
   architectName: string;
   status: Status;
+  prerequisiteInitialLabel?: string;
 }) {
   const router = useRouter();
   const [f, setF] = useState<SeedEditorInput>(initial);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+  // Topic combobox: existing Topics under the chosen subject, filtered locally.
+  const [allTopics, setAllTopics] = useState<ComboItem[]>([]);
+  const [topicQuery, setTopicQuery] = useState("");
+  // Prerequisite combobox: async search over the author's own seeds.
+  const [prereqOptions, setPrereqOptions] = useState<ComboItem[]>([]);
+  const [prereqLabel, setPrereqLabel] = useState(prerequisiteInitialLabel);
+
+  const isPublished = status === "published";
+
   function set<K extends keyof SeedEditorInput>(key: K, value: SeedEditorInput[K]) {
     setF((prev) => ({ ...prev, [key]: value }));
     setError(null);
+  }
+
+  // Load the chosen subject's Topics whenever the subject changes.
+  useEffect(() => {
+    let alive = true;
+    if (!f.subjectId) {
+      setAllTopics([]);
+      return;
+    }
+    listSubjectTopicsAction(f.subjectId).then((items) => {
+      if (alive) setAllTopics(items);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [f.subjectId]);
+
+  const topicItems = useMemo(() => {
+    const q = topicQuery.trim().toLowerCase();
+    return q
+      ? allTopics.filter((t) => t.label.toLowerCase().includes(q))
+      : allTopics;
+  }, [allTopics, topicQuery]);
+
+  function loadPrereq(query: string) {
+    searchOwnSeedsAction(query, initial.seedId).then(setPrereqOptions);
   }
 
   // Completeness (publish gate) — same field set as lib/seeds.ts assertSeedComplete.
@@ -79,7 +123,6 @@ export function SeedEditor({
   const canSave =
     f.title.trim() !== "" && f.subjectId !== "" && f.topicName.trim() !== "";
   const canPublish = missing.length === 0;
-  const isPublished = status === "published";
 
   function run(action: typeof saveDraftAction) {
     setError(null);
@@ -157,16 +200,21 @@ export function SeedEditor({
           </Field>
           <Field
             label="Topic"
-            hint="Type a topic; a new one is created under the subject."
+            hint="Pick an existing topic, or type a new one to create it under the subject."
             required
           >
-            <input
-              className={inputClass}
+            <Combobox
+              id="topic"
+              items={topicItems}
               value={f.topicName}
-              onChange={(e) => set("topicName", e.target.value)}
-              placeholder="e.g. Multiplication"
-              maxLength={120}
-              disabled={isPublished}
+              allowCustom
+              onQueryChange={setTopicQuery}
+              onSelect={(v) => set("topicName", v)}
+              placeholder={f.subjectId ? "Select or create a topic" : "Choose a subject first"}
+              searchPlaceholder="Search or type a new topic…"
+              emptyText="No topics yet — type to create one."
+              createLabel={(q) => `Create topic “${q}”`}
+              disabled={isPublished || !f.subjectId}
             />
           </Field>
         </div>
@@ -237,17 +285,40 @@ export function SeedEditor({
           />
         </Field>
 
+        <Field
+          label="Prerequisite seed"
+          hint="Optionally link a prior seed of yours that covers the immediately preceding topic. Optional."
+        >
+          <Combobox
+            id="prerequisite"
+            items={prereqOptions}
+            value={f.prerequisiteSeedId}
+            displayLabel={prereqLabel}
+            clearable
+            onOpen={() => loadPrereq("")}
+            onQueryChange={loadPrereq}
+            onSelect={(v, label) => {
+              set("prerequisiteSeedId", v);
+              setPrereqLabel(v ? label : "");
+            }}
+            placeholder="No prerequisite seed"
+            searchPlaceholder="Search your seeds…"
+            emptyText="No matching seeds of yours."
+            disabled={isPublished}
+          />
+        </Field>
+
         <SectionHeading>Content</SectionHeading>
         <Field
-          label="The idea"
-          hint="The substantive pedagogical material — the core of the seed."
+          label="What needs to be covered"
+          hint="Be as technical as the material demands — the concepts, methods, and depth a module built from this seed must teach. Substance, not a rough sketch."
           required
         >
           <textarea
             className={`${inputClass} min-h-40 resize-y`}
             value={f.content}
             onChange={(e) => set("content", e.target.value)}
-            placeholder="Worked examples, explanations, the approach…"
+            placeholder="The concepts, definitions, methods, and level of depth to cover…"
             disabled={isPublished}
           />
         </Field>

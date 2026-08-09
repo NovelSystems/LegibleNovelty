@@ -16,6 +16,7 @@ const EMPTY: SeedEditorInput = {
   complexity: "",
   content: "",
   notes: "",
+  prerequisiteSeedId: "",
 };
 
 export default async function NewSeedPage() {

@@ -97,6 +97,12 @@
   --color-card: var(--color-white);
   --color-card-foreground: var(--color-gray-700);
 
+  /* Popover/overlay surface (shadcn Popover + Command use these). Same white
+   * surface + body text as a card — added so shadcn's default class names
+   * resolve to OUR tokens instead of shadcn's built-in palette. */
+  --color-popover: var(--color-white);
+  --color-popover-foreground: var(--color-gray-700);
+
   --color-border: var(--color-gray-200);
   --color-input: var(--color-gray-300);
   --color-ring: var(--color-teal-600); /* focus ring */

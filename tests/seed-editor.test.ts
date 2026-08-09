@@ -153,4 +153,61 @@ describe("Seed Editor — editor save/publish backend", () => {
       publishDraft(seed.seed_id, architect.account_id),
     ).rejects.toBeInstanceOf(SeedError);
   });
+
+  // --- Structured prerequisite-seed link ------------------------------------
+
+  it("stores a prerequisite link to the author's own prior seed", async () => {
+    const { architect, subject, topic, seed: prior } = await completeDraft();
+    const next = await createSeedDraft({
+      architectAccountId: architect.account_id,
+      title: "Next in sequence",
+      subjectId: subject.taxonomy_id,
+      topicId: topic.taxonomy_id,
+      prerequisiteSeedId: prior.seed_id,
+    });
+    expect(next.prerequisite_seed_id).toBe(prior.seed_id);
+  });
+
+  it("rejects a prerequisite that is not one of the author's own seeds", async () => {
+    const owner = await completeDraft(); // owner + a seed
+    const stranger = await makeAccount();
+    const { subject, topic } = await makeTaxonomyPair();
+    await expect(
+      createSeedDraft({
+        architectAccountId: stranger.account_id,
+        title: "Points at someone else's seed",
+        subjectId: subject.taxonomy_id,
+        topicId: topic.taxonomy_id,
+        prerequisiteSeedId: owner.seed.seed_id,
+      }),
+    ).rejects.toBeInstanceOf(SeedError);
+  });
+
+  it("updateSeedDraft sets, clears, and refuses a self-referential prerequisite", async () => {
+    const { architect, subject, topic, seed } = await completeDraft();
+    const prior = await createSeedDraft({
+      architectAccountId: architect.account_id,
+      title: "A prior seed",
+      subjectId: subject.taxonomy_id,
+      topicId: topic.taxonomy_id,
+    });
+
+    const linked = await updateSeedDraft(seed.seed_id, architect.account_id, {
+      prerequisiteSeedId: prior.seed_id,
+    });
+    expect(linked.prerequisite_seed_id).toBe(prior.seed_id);
+
+    // "" clears it back to null (no FK).
+    const cleared = await updateSeedDraft(seed.seed_id, architect.account_id, {
+      prerequisiteSeedId: "",
+    });
+    expect(cleared.prerequisite_seed_id).toBeNull();
+
+    // A seed cannot be its own prerequisite.
+    await expect(
+      updateSeedDraft(seed.seed_id, architect.account_id, {
+        prerequisiteSeedId: seed.seed_id,
+      }),
+    ).rejects.toBeInstanceOf(SeedError);
+  });
 });
