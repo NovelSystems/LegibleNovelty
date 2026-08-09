@@ -110,7 +110,7 @@ export interface CreateSeedArgs {
   associatedCommissionId?: string; // Soft reference; unenforced.
   isEnrichment?: boolean;
   // Seed Editor curriculum metadata — all optional so a draft can be saved
-  // incomplete; required only to PROMOTE the seed to a Module (assertSeedPromotable).
+  // incomplete; required by the Seed Editor's PUBLISH gate (assertSeedComplete).
   curriculumLoad?: Prisma.LearningSeedCreateInput["curriculum_load"];
   complexity?: Prisma.LearningSeedCreateInput["complexity"];
   content?: string;
@@ -223,11 +223,13 @@ export async function updateSeedDraft(
   });
 }
 
-// Completeness gate for PUBLISH from the Seed Editor. Mirrors the module
-// promotion gate (assertSeedPromotable in lib/modules.ts) field-for-field, plus
-// `title` — a publishable seed is a complete one. lesson_size_scope, notes and
-// target_learner_characteristics remain optional even at publish. "" counts as
-// missing (drafts store "" for unfilled text), hence the `.trim()` checks.
+// Completeness gate for PUBLISH from the Seed Editor. A publishable seed is a
+// complete one: subject, topic, curriculumLoad, complexity, prerequisiteKnowledge
+// (entry_prerequisite), learningOutcome (learning_objective), content, plus
+// `title`. lesson_size_scope, notes and target_learner_characteristics remain
+// optional even at publish. "" counts as missing (drafts store "" for unfilled
+// text), hence the `.trim()` checks. (This is the Seed side; the Module side no
+// longer gates on seed completeness at all.)
 export function assertSeedComplete(seed: {
   title: string | null;
   subject_id: string | null;

@@ -84,42 +84,17 @@ function contentSatisfies(moduleText: string, requirement: string): boolean {
 
 // --- create / secondary seeds ------------------------------------------------
 
-// A Seed may be saved as an incomplete draft; PROMOTION to a Module is the gate
-// where content-completeness is enforced — a check at the transition itself, the
-// same shape as the ai_attestation check in submitForReview, not a schema
-// constraint. `prerequisiteKnowledge`/`learningOutcome` from the Seed Editor spec
-// map to the seed's existing required `entry_prerequisite`/`learning_objective`.
-export function assertSeedPromotable(seed: {
-  subject_id: string | null;
-  topic_id: string | null;
-  curriculum_load: unknown;
-  complexity: unknown;
-  entry_prerequisite: string | null;
-  learning_objective: string | null;
-  content: string | null;
-}) {
-  const missing: string[] = [];
-  if (!seed.subject_id) missing.push("subject");
-  if (!seed.topic_id) missing.push("topic");
-  if (!seed.curriculum_load) missing.push("curriculumLoad");
-  if (!seed.complexity) missing.push("complexity");
-  if (!seed.entry_prerequisite?.trim()) missing.push("prerequisiteKnowledge");
-  if (!seed.learning_objective?.trim()) missing.push("learningOutcome");
-  if (!seed.content?.trim()) missing.push("content");
-  if (missing.length > 0) {
-    throw new ModuleError(
-      `Seed is not complete enough to promote to a module (missing: ${missing.join(", ")}).`,
-    );
-  }
-}
-
+// createModule does NOT gate on seed content-completeness. A Module references a
+// primary Seed *revision*, which only exists once the seed has been published;
+// beyond that (and the DSS lock), nothing here gates creation — matching the
+// Module Editor brief, which names no seed-completeness precondition. The
+// referential "primary seed must be published" check lives at the module's
+// publish transition (submitForReview), alongside the ai_attestation check.
 export async function createModule(
   args: { authorAccountId: string; primarySeedId: string; aiAttestation?: Prisma.ContextualizedModuleCreateInput["ai_attestation"] },
   now: Date = new Date(),
 ) {
   await assertDssNotLocked(args.authorAccountId, now); // REUSE — same function.
-  const seed = await prisma.learningSeed.findUniqueOrThrow({ where: { seed_id: args.primarySeedId } });
-  assertSeedPromotable(seed); // Promotion gate: the seed must be content-complete.
   const rev = await latestSeedRevision(args.primarySeedId);
   return prisma.contextualizedModule.create({
     data: {
@@ -262,6 +237,18 @@ export async function submitForReview(moduleId: string, authorId: string, now: D
   }
   if (module.ai_attestation == null) {
     throw new ModuleError("An AI attestation must be declared before submitting for review.");
+  }
+  // Referential gate: a Module cannot publish while pointing at a primary seed
+  // that was never itself published. This is NOT a re-check of seed content-
+  // completeness (that gate was removed) — only that the referenced seed reached
+  // published status. Secondary seeds are intentionally not checked here (see the
+  // module-authoring test); they are already pinned to a SeedRevision at add
+  // time, which only exists post-publish.
+  const primarySeed = await prisma.learningSeed.findUniqueOrThrow({
+    where: { seed_id: module.primary_seed_id },
+  });
+  if (primarySeed.published_at == null) {
+    throw new ModuleError("The primary seed must be published before the module can be submitted for review.");
   }
   return prisma.contextualizedModule.update({
     where: { module_id: moduleId },
