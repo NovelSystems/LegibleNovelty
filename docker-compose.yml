@@ -34,7 +34,22 @@ services:
       interval: 5s
       timeout: 5s
       retries: 15
-      start_period: 10s
+      # Grace window for a COLD start. check.sh tears down and recreates the
+      # volume on every run, so a full `initdb` PLUS provisioning the shadow and
+      # test databases (./db/init) is paid on every single invocation, never
+      # amortized. During `start_period`, failing probes do NOT count against
+      # `retries`; a passing probe still flips the container to healthy the
+      # instant it succeeds. The old 10s let those failed probes start counting
+      # mid-init, so on Docker Desktop's WSL2 backend — where fresh-volume I/O is
+      # measurably slower than a native Linux CI runner — a slow cold start could
+      # exhaust the retry budget and report "did not become healthy" as an
+      # intermittent race (observed to pass on a plain retry, i.e. hovering near
+      # the old ~85s ceiling: 10s grace + 15×5s). 60s widens the grace to
+      # comfortably cover a slow-volume cold start (new ceiling ~135s = 60s +
+      # 15×5s) while a fast native start pays no penalty and a genuinely crashed
+      # container still fails `--wait` immediately (an exited container is not
+      # "slow", so it is reported at once regardless of this window).
+      start_period: 60s
 
   app:
     build:
