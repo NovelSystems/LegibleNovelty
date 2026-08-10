@@ -150,7 +150,7 @@ Also used: `SHADOW_DATABASE_URL` (for `prisma migrate dev`), `AUTH_SECRET` / `AU
 
 ## Contributing
 
-Work happens on feature branches and is validated with `./scripts/check.sh` before merge, no external accounts or services are needed to run the full check locally. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for cross-cutting patterns worth knowing before touching this code. The repository is public.
+Work happens on feature branches and is validated with `./scripts/check.sh` before merge, no external accounts or services are needed to run the full check locally.
 
 ## License
 
