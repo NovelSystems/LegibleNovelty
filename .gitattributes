@@ -1,0 +1,17 @@
+# Line-ending policy. Everything in this repo runs inside Linux containers, so
+# LF is authoritative on every platform. Without this, a Windows checkout (git
+# core.autocrlf) silently rewrites text files — including executable shell
+# scripts — to CRLF, which then breaks when a Linux container executes them:
+#   /docker-entrypoint-initdb.d/01-create-databases.sh: /bin/sh^M: bad interpreter
+# Enforcing LF here prevents that for every future contributor, not just a
+# one-time fix of the files affected today.
+
+# Default: treat files as text with auto-detection, and always check out LF.
+* text=auto eol=lf
+
+# Shell scripts are executed inside Linux containers — force LF explicitly,
+# independent of the auto-detection above. This is the load-bearing line.
+*.sh text eol=lf
+
+# Binary assets: never line-ending-normalize (fonts live in app/fonts/).
+*.woff2 binary
