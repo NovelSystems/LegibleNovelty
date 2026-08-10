@@ -552,6 +552,9 @@ model Taxonomy {
   seeds_as_subject LearningSeed[] @relation("SeedSubject")
   seeds_as_topic   LearningSeed[] @relation("SeedTopic")
   chains           SeedChain[]
+  // Revisions whose frozen placement points here (FK — follows this node's id).
+  revisions_as_subject SeedRevision[] @relation("RevisionSubject")
+  revisions_as_topic   SeedRevision[] @relation("RevisionTopic")
 
   @@index([level])
   @@index([parent_id])
@@ -645,7 +648,9 @@ model LearningSeed {
 
   invites         SeedDraftInvite[]
   comments        SeedDraftComment[]
-  revisions       SeedRevision[]
+  revisions       SeedRevision[]     @relation("SeedOwnRevisions") // This seed's own history.
+  // Revisions of OTHER seeds that froze THIS seed as their prerequisite link.
+  revisions_as_prerequisite SeedRevision[] @relation("RevisionPrerequisite")
   reports         SeedReport[]
   modules         ContextualizedModule[] // Modules whose primary seed is this seed.
   chain_edges_out SeedChain[]            @relation("ChainFrom")
@@ -735,7 +740,11 @@ model SeedDraftComment {
 model SeedRevision {
   revision_id       String       @id @default(uuid())
   seed_id           String
-  seed              LearningSeed @relation(fields: [seed_id], references: [seed_id])
+  // Named relation: SeedRevision has a SECOND FK to LearningSeed below
+  // (prerequisite_seed), so both must be named to disambiguate. This is the
+  // revision's own parent seed; naming it is a Prisma-level annotation only (the
+  // seed_id FK constraint is unchanged).
+  seed              LearningSeed @relation("SeedOwnRevisions", fields: [seed_id], references: [seed_id])
   editor_account_id String
   editor            Account      @relation("RevisionEditor", fields: [editor_account_id], references: [account_id])
   // Sequential per seed (1-based), for stable ordering of queryable history.
@@ -751,19 +760,48 @@ model SeedRevision {
   // optional for the architect's own edits — hence nullable at the column level.
   edit_summary      String?
 
-  // Full content snapshot of the seed as of this revision (not a diff).
-  // subject_id / topic_id are stored as plain snapshot values (no FK), since a
-  // revision is a historical record of placement as it was at edit time.
+  // Full content snapshot of the seed as of this revision (not a diff) — every
+  // field that defines what the seed teaches or requires, frozen so a cited
+  // revision reproduces the seed as it was, independent of later edits.
+  //
+  // Placement is a FOREIGN KEY to the live Taxonomy node, deliberately NOT a
+  // frozen label. Each Subject/Topic has a stable id, so the relationship
+  // follows the id: a rename updates the label everywhere through that id, and
+  // taxonomy is deprecate-not-delete, so a retired node keeps its row and the FK
+  // never dangles. A reorganization is handled out-of-band (notify authors to
+  // re-revise onto the new node), not by freezing an old label here.
+  //
+  // The prerequisite link is handled the same way — a FOREIGN KEY to the live
+  // prior seed (follows the id) — but ALSO stores prerequisite_seed_title: the
+  // prerequisite's title AS OF this snapshot, for retrospective consistency. A
+  // seed's title is freely editable, so freezing it lets an old revision still
+  // show the prerequisite by the name it had when cited, while the FK still
+  // resolves to the current seed.
+  //
+  // Deliberately NOT snapshotted: lifecycle-only fields (status, published_at,
+  // deleted_at), immutable identity/ownership (the seed_id PK, architect_account_id
+  // — which createSeedRevision never changes), and associated_commission_id (a
+  // commercial soft-reference to the not-yet-built Commission Marketplace, not
+  // part of what the seed teaches or requires).
+  title                          String?
   learning_objective             String
   entry_prerequisite             String
   algorithmic_constraints        Json?
   lesson_size_scope              String
   subject_id                     String
+  subject                        Taxonomy @relation("RevisionSubject", fields: [subject_id], references: [taxonomy_id])
   topic_id                       String
+  topic                          Taxonomy @relation("RevisionTopic", fields: [topic_id], references: [taxonomy_id])
   target_learner_characteristics String?
   language                       String
   notes                          String
   is_enrichment                  Boolean
+  curriculum_load                CurriculumLoad?
+  complexity                     Complexity?
+  content                        String?
+  prerequisite_seed_id           String?
+  prerequisite_seed              LearningSeed?   @relation("RevisionPrerequisite", fields: [prerequisite_seed_id], references: [seed_id])
+  prerequisite_seed_title        String?
 
   created_at DateTime @default(now())
 
@@ -774,6 +812,11 @@ model SeedRevision {
   @@unique([seed_id, revision_number])
   @@index([seed_id])
   @@index([editor_account_id])
+  // FK columns, indexed for the reverse lookups the relations enable (e.g.
+  // revisions under a Taxonomy node, or citing a given prerequisite seed).
+  @@index([subject_id])
+  @@index([topic_id])
+  @@index([prerequisite_seed_id])
 }
 
 // ===========================================================================
