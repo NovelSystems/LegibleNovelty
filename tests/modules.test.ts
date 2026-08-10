@@ -10,8 +10,9 @@ import {
   setCommission,
   setAiAttestation,
   addSecondarySeed,
+  touchModuleEdited,
 } from "@/lib/modules";
-import { updateElementContent } from "@/lib/module-authoring";
+import { addPage, createElement, updateElementContent } from "@/lib/module-authoring";
 import { StandingScoreError, lockStandingScoreDirectly } from "@/lib/standing-scores";
 import { createSeedDraft, submitForReview as submitSeed, publishSeed } from "@/lib/seeds";
 import { makeAccount } from "./helpers/factory";
@@ -201,6 +202,53 @@ describe("Module Editor — lifecycle, DSS lock, publication gate", () => {
     });
     const submitted = await submitForReview(module.module_id, author.account_id);
     expect(submitted.status).toBe("pending_review");
+  });
+
+  it("never auto-populates ai_attestation: an unset draft stays NULL through create and edits", async () => {
+    // The enforceable form of "a draft doesn't need to be finished to be saved":
+    // the ONLY writer of a non-null ai_attestation is an explicit author
+    // declaration (setAiAttestation). Nothing in create or the draft-editing
+    // paths may silently populate it. This regression-guards the bug that a
+    // backfill migration papered over — a draft pinned to a value its author
+    // never declared.
+    const { seed } = await makePublishedPrimarySeed();
+    const author = await makeAccount();
+
+    // Create a draft WITHOUT declaring an attestation → must be NULL.
+    const module = await createModule({
+      authorAccountId: author.account_id,
+      primarySeedId: seed.seed_id,
+    });
+    expect(module.ai_attestation).toBeNull();
+
+    // Edit the draft through real editing paths — content authoring and a
+    // module-row touch — none of which is an attestation declaration.
+    const page = await addPage(module.module_id, 0);
+    await createElement(page.page_id, {
+      element_type: "text",
+      position_x: 0,
+      position_y: 0,
+      width: 100,
+      height: 50,
+      z_index: 0,
+      content: { plainText: "authored draft content" },
+    });
+    await touchModuleEdited(module.module_id, author.account_id);
+
+    // Still NULL after editing — nothing auto-populated it.
+    const afterEdits = await prisma.contextualizedModule.findUniqueOrThrow({
+      where: { module_id: module.module_id },
+    });
+    expect(afterEdits.ai_attestation).toBeNull();
+
+    // Positive control: the field CAN be written — but only by the explicit
+    // author declaration, which is exactly what makes the NULLs above meaningful.
+    const declared = await setAiAttestation(
+      module.module_id,
+      author.account_id,
+      "wholly_human",
+    );
+    expect(declared.ai_attestation).toBe("wholly_human");
   });
 
   it("keeps flair_tags and prepublication_review_report as inert, unused columns", async () => {
