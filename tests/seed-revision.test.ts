@@ -1,8 +1,11 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/prisma";
 import {
+  createSeedDraft,
   createSeedRevision,
   getSeedRevisionHistory,
+  publishSeed,
+  submitForReview,
   SeedError,
 } from "@/lib/seeds";
 import { makeAccount } from "./helpers/factory";
@@ -192,5 +195,98 @@ describe("SeedRevision — controlled-document edits", () => {
     expect(baseline.subject_id).toBe(pub.subject_id);
     expect(baseline.topic_id).toBe(pub.topic_id);
     expect(baseline.language).toBe(pub.language);
+  });
+
+  it("baseline revision snapshots EVERY content field, and freezes taxonomy labels against later renames", async () => {
+    const architect = await makeAccount({ endorsed: true });
+    const { subject, topic } = await makeTaxonomyPair({
+      subject: `SnapSub-${Math.random()}`,
+      topic: `SnapTop-${Math.random()}`,
+    });
+
+    // A prior published seed of the same architect, to be the structured
+    // prerequisite link (assertOwnPrerequisite requires an own, non-deleted seed).
+    const prior = await createSeedDraft({
+      architectAccountId: architect.account_id,
+      title: "Prior seed",
+      subjectId: subject.taxonomy_id,
+      topicId: topic.taxonomy_id,
+    });
+    await submitForReview(prior.seed_id, architect.account_id);
+    await publishSeed(prior.seed_id, architect.account_id);
+
+    // A fully-populated seed: every content/pedagogical field set to a distinct,
+    // checkable value.
+    const draft = await createSeedDraft({
+      architectAccountId: architect.account_id,
+      title: "Fully populated seed",
+      learningObjective: "Recall single-digit products.",
+      entryPrerequisite: "Can skip-count.",
+      lessonSizeScope: "single-session",
+      subjectId: subject.taxonomy_id,
+      topicId: topic.taxonomy_id,
+      notes: "catch-all notes",
+      language: "es",
+      algorithmicConstraints: { multiplier: [2, 9] },
+      targetLearnerCharacteristics: "visual learners",
+      isEnrichment: true,
+      curriculumLoad: "worksheet",
+      complexity: "beginner",
+      content: "Worked examples and practice.",
+      prerequisiteSeedId: prior.seed_id,
+    });
+    await submitForReview(draft.seed_id, architect.account_id);
+    await publishSeed(draft.seed_id, architect.account_id);
+
+    const baseline = (await getSeedRevisionHistory(draft.seed_id))[0];
+
+    // Every content field survives into the snapshot.
+    expect(baseline.title).toBe("Fully populated seed");
+    expect(baseline.learning_objective).toBe("Recall single-digit products.");
+    expect(baseline.entry_prerequisite).toBe("Can skip-count.");
+    expect(baseline.lesson_size_scope).toBe("single-session");
+    expect(baseline.subject_id).toBe(subject.taxonomy_id);
+    expect(baseline.topic_id).toBe(topic.taxonomy_id);
+    expect(baseline.target_learner_characteristics).toBe("visual learners");
+    expect(baseline.language).toBe("es");
+    expect(baseline.notes).toBe("catch-all notes");
+    expect(baseline.algorithmic_constraints).toEqual({ multiplier: [2, 9] });
+    expect(baseline.is_enrichment).toBe(true);
+    expect(baseline.curriculum_load).toBe("worksheet");
+    expect(baseline.complexity).toBe("beginner");
+    expect(baseline.content).toBe("Worked examples and practice.");
+
+    // Placement is stored as ids (FK follows the live node).
+    expect(baseline.subject_id).toBe(subject.taxonomy_id);
+    expect(baseline.topic_id).toBe(topic.taxonomy_id);
+    // Prerequisite: the id (FK) AND the frozen title, per the design.
+    expect(baseline.prerequisite_seed_id).toBe(prior.seed_id);
+    expect(baseline.prerequisite_seed_title).toBe("Prior seed");
+
+    // Subject/topic are FOREIGN KEYS — a Taxonomy rename FOLLOWS the id, it does
+    // not freeze: the revision joined to its subject reflects the new name.
+    await prisma.taxonomy.update({
+      where: { taxonomy_id: subject.taxonomy_id },
+      data: { name: "RENAMED SUBJECT" },
+    });
+    const joined = await prisma.seedRevision.findUniqueOrThrow({
+      where: { revision_id: baseline.revision_id },
+      include: { subject: true, prerequisite_seed: true },
+    });
+    expect(joined.subject_id).toBe(subject.taxonomy_id); // id unchanged
+    expect(joined.subject.name).toBe("RENAMED SUBJECT"); // label follows the id
+
+    // Prerequisite: the FK follows the live seed, but the frozen title stays as
+    // of citation. Rename the prior seed's title and confirm both behaviors.
+    await prisma.learningSeed.update({
+      where: { seed_id: prior.seed_id },
+      data: { title: "Prior seed RENAMED" },
+    });
+    const after = await prisma.seedRevision.findUniqueOrThrow({
+      where: { revision_id: baseline.revision_id },
+      include: { prerequisite_seed: true },
+    });
+    expect(after.prerequisite_seed_title).toBe("Prior seed"); // frozen
+    expect(after.prerequisite_seed?.title).toBe("Prior seed RENAMED"); // FK follows live
   });
 });

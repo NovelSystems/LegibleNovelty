@@ -4,22 +4,49 @@ import { assertCanPublish } from "@/lib/quota";
 import { assertDssNotLocked } from "@/lib/standing-scores";
 
 // The full content-snapshot columns shared by a published seed and a
-// SeedRevision row (used for the publish-time baseline revision).
-function seedContentSnapshot(seed: LearningSeed) {
+// SeedRevision row. Captures EVERY field that defines what the seed teaches or
+// requires (see the SeedRevision model comment for what is deliberately left out
+// and why). Placement (subject_id/topic_id) and the prerequisite link
+// (prerequisite_seed_id) are stored as ids and wired as FOREIGN KEYS on the
+// revision — they follow the live node/seed by id, not a frozen label. The one
+// exception is `prerequisite_seed_title`: the prerequisite seed's title is
+// freely editable, so it is frozen here (resolved by the caller) for
+// retrospective consistency, while the FK still resolves the current seed.
+function seedContentSnapshot(seed: LearningSeed, prerequisiteTitle: string | null) {
   const ac = seed.algorithmic_constraints;
   return {
+    title: seed.title,
     learning_objective: seed.learning_objective,
     entry_prerequisite: seed.entry_prerequisite,
     lesson_size_scope: seed.lesson_size_scope,
     subject_id: seed.subject_id,
     topic_id: seed.topic_id,
-    notes: seed.notes,
+    target_learner_characteristics: seed.target_learner_characteristics,
     language: seed.language,
+    notes: seed.notes,
     algorithmic_constraints:
       ac === null ? undefined : (ac as Prisma.InputJsonValue),
-    target_learner_characteristics: seed.target_learner_characteristics,
     is_enrichment: seed.is_enrichment,
+    curriculum_load: seed.curriculum_load,
+    complexity: seed.complexity,
+    content: seed.content,
+    prerequisite_seed_id: seed.prerequisite_seed_id,
+    prerequisite_seed_title: prerequisiteTitle,
   };
+}
+
+// Resolve the prerequisite seed's title to freeze into a snapshot (null when
+// there is no prerequisite). Only the TITLE is frozen — the prerequisite_seed_id
+// FK still points at the live seed.
+async function resolvePrerequisiteTitle(
+  prerequisiteSeedId: string | null,
+): Promise<string | null> {
+  if (!prerequisiteSeedId) return null;
+  const prereq = await prisma.learningSeed.findUnique({
+    where: { seed_id: prerequisiteSeedId },
+    select: { title: true },
+  });
+  return prereq?.title ?? null;
 }
 
 // Learning Seed lifecycle + the private draft-sharing/comment workflow
@@ -434,6 +461,10 @@ export async function publishSeed(
   await assertDssNotLocked(architectAccountId, now);
   await assertCanPublish(architectAccountId, now);
 
+  // Freeze the prerequisite's title for the baseline snapshot (placement and the
+  // prerequisite id itself are FKs — they follow the live node/seed).
+  const prerequisiteTitle = await resolvePrerequisiteTitle(seed.prerequisite_seed_id);
+
   return prisma.$transaction(async (tx) => {
     const updated = await tx.learningSeed.update({
       where: { seed_id: seedId },
@@ -456,7 +487,7 @@ export async function publishSeed(
           revision_number: 1,
           made_as_moderator: false,
           edit_summary: null,
-          ...seedContentSnapshot(seed),
+          ...seedContentSnapshot(seed, prerequisiteTitle),
         },
       });
     }
@@ -631,7 +662,10 @@ export async function createSeedRevision(args: {
   const revisionNumber =
     (await prisma.seedRevision.count({ where: { seed_id: args.seedId } })) + 1;
 
-  const content = {
+  // The fields this edit actually changes — applied to the LIVE seed (unchanged
+  // behavior: a revision edits placement/objective/etc., never touches title,
+  // content, curriculum metadata or the prerequisite link).
+  const editFields = {
     learning_objective: args.content.learningObjective,
     entry_prerequisite: args.content.entryPrerequisite,
     lesson_size_scope: args.content.lessonSizeScope,
@@ -645,6 +679,17 @@ export async function createSeedRevision(args: {
     is_enrichment: args.content.isEnrichment ?? seed.is_enrichment,
   };
 
+  // The revision snapshot is the FULL seed as it will stand after this edit:
+  // the current seed frozen (including title/content/curriculum metadata/the
+  // prerequisite link, which this edit doesn't change), with the edited fields
+  // applied on top. Only the prerequisite TITLE is resolved-and-frozen; the
+  // edited placement is a plain id (the FK follows it).
+  const prerequisiteTitle = await resolvePrerequisiteTitle(seed.prerequisite_seed_id);
+  const snapshot = {
+    ...seedContentSnapshot(seed, prerequisiteTitle),
+    ...editFields,
+  };
+
   return prisma.$transaction(async (tx) => {
     const revision = await tx.seedRevision.create({
       data: {
@@ -653,12 +698,15 @@ export async function createSeedRevision(args: {
         revision_number: revisionNumber,
         made_as_moderator: madeAsModerator,
         edit_summary: editSummary,
-        ...content,
+        ...snapshot,
       },
     });
-    // Apply the new content to the live seed — WITHOUT ever touching
+    // Apply ONLY the edited fields to the live seed — WITHOUT ever touching
     // architect_account_id (the fixed owner), status, or published_at.
-    await tx.learningSeed.update({ where: { seed_id: args.seedId }, data: content });
+    await tx.learningSeed.update({
+      where: { seed_id: args.seedId },
+      data: editFields,
+    });
     return revision;
   });
 }
