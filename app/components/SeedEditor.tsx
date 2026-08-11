@@ -16,6 +16,7 @@ import type {
   ComboItem,
 } from "@/app/seeds/types";
 import { Combobox } from "@/components/ui/combobox";
+import { startModuleAction } from "@/app/modules/actions";
 
 // The Seed Editor screen. A focused authoring form: the brief is explicit that
 // the field list should SHRINK, so this intentionally omits the source
@@ -123,6 +124,21 @@ export function SeedEditor({
   const canSave =
     f.title.trim() !== "" && f.subjectId !== "" && f.topicName.trim() !== "";
   const canPublish = missing.length === 0;
+
+  // On-ramp: a published seed can start a Module (createModule pins the seed's
+  // latest revision), then routes to the module authoring screen.
+  function onStartModule() {
+    if (!initial.seedId) return;
+    setError(null);
+    startTransition(async () => {
+      const res = await startModuleAction(initial.seedId as string);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      router.push(`/modules/${res.moduleId}/edit`);
+    });
+  }
 
   function run(action: typeof saveDraftAction) {
     setError(null);
@@ -357,6 +373,16 @@ export function SeedEditor({
               </span>
             )}
           </div>
+          {isPublished && initial.seedId && (
+            <button
+              type="button"
+              onClick={onStartModule}
+              disabled={pending}
+              className="rounded-md bg-primary px-4 py-2 text-base font-medium text-primary-foreground hover:bg-primary-hover active:bg-primary-active disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {pending ? "Working…" : "Start a Module"}
+            </button>
+          )}
           {!isPublished && (
             <div className="flex items-center gap-3">
               <button

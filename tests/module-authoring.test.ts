@@ -1,12 +1,14 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/prisma";
-import { createModule, publishModule, submitForReview } from "@/lib/modules";
+import { createModule, publishModule, submitForReview, ModuleError } from "@/lib/modules";
 import {
   addPage,
+  assertUnderPageCap,
   createElement,
   extractFillableFields,
   findFillableFieldInModule,
   getModuleTree,
+  moduleMaxPages,
   moveElement,
 } from "@/lib/module-authoring";
 import { canViewModule } from "@/lib/module-visibility";
@@ -112,5 +114,38 @@ describe("Module Editor — authoring model + visibility gate", () => {
 
     // Endorsed content is visible to all ages.
     expect(await canViewModule(graduatedMinor, module.module_id, hasEndorsement)).toBe(true);
+  });
+
+  it("caps pages by the PINNED revision's curriculum_load, not the live seed", async () => {
+    // makePublishedPrimarySeed publishes a seed with curriculum_load = worksheet
+    // (cap 2), captured in its baseline SeedRevision.
+    const { seed } = await makePublishedPrimarySeed();
+    const author = await makeAccount();
+    const module = await createModule({
+      authorAccountId: author.account_id,
+      primarySeedId: seed.seed_id,
+    });
+    expect(await moduleMaxPages(module.module_id)).toBe(2);
+
+    // Edit the LIVE seed's curriculum_load to a larger tier AFTER the module
+    // pinned its revision.
+    await prisma.learningSeed.update({
+      where: { seed_id: seed.seed_id },
+      data: { curriculum_load: "extended_unit" },
+    });
+
+    // The cap is UNCHANGED — it reads the pinned snapshot, not the live seed.
+    // This is the entire point of the snapshot-completeness fix.
+    expect(await moduleMaxPages(module.module_id)).toBe(2);
+
+    // Enforcement: pages up to the limit are allowed; the next is rejected.
+    await assertUnderPageCap(module.module_id); // 0 pages — ok
+    await addPage(module.module_id, 0);
+    await assertUnderPageCap(module.module_id); // 1 page — ok
+    await addPage(module.module_id, 1);
+    // 2 pages == worksheet cap → rejected.
+    await expect(assertUnderPageCap(module.module_id)).rejects.toBeInstanceOf(
+      ModuleError,
+    );
   });
 });

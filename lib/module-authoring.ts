@@ -1,5 +1,43 @@
 import { prisma } from "@/lib/prisma";
-import type { ModuleElementType, Prisma } from "@prisma/client";
+import type { CurriculumLoad, ModuleElementType, Prisma } from "@prisma/client";
+import { ModuleError } from "@/lib/modules";
+
+// --- page cap (tied to the pinned SeedRevision snapshot) ---------------------
+// Max pages per module, keyed by the curriculum_load of the module's PINNED seed
+// revision. Named constants: the exact values are expected to be tuned later.
+export const MODULE_PAGE_CAPS: Record<CurriculumLoad, number> = {
+  worksheet: 2,
+  short_unit: 10,
+  extended_unit: 30,
+};
+
+// The page cap for a module, derived from its PINNED SeedRevision snapshot
+// (curriculum_load frozen at module-creation time) — NOT the live seed. This is
+// the whole point of the snapshot-completeness fix: editing the live seed's
+// curriculum_load afterward must not change an existing module's cap. A null
+// curriculum_load on the snapshot imposes no cap.
+export async function moduleMaxPages(moduleId: string): Promise<number> {
+  const module = await prisma.contextualizedModule.findUniqueOrThrow({
+    where: { module_id: moduleId },
+    select: { primary_seed_revision: { select: { curriculum_load: true } } },
+  });
+  const load = module.primary_seed_revision.curriculum_load;
+  return load ? MODULE_PAGE_CAPS[load] : Number.POSITIVE_INFINITY;
+}
+
+// Throws if the module is already at its page cap. Called by the authoring UI's
+// add-page action before creating a page.
+export async function assertUnderPageCap(moduleId: string): Promise<void> {
+  const [max, count] = await Promise.all([
+    moduleMaxPages(moduleId),
+    prisma.modulePage.count({ where: { module_id: moduleId } }),
+  ]);
+  if (count >= max) {
+    throw new ModuleError(
+      `This module is at its page limit (${max}) for its seed's curriculum load.`,
+    );
+  }
+}
 
 // Module authoring model (Module Editor Task 7): a module is an ordered sequence
 // of pages; each page holds freely-positioned elements. Templates are a
