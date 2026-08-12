@@ -239,10 +239,14 @@
   display: inline-block;
   padding: 0 0.25rem;
   border-radius: var(--radius-sm);
-  background-color: var(--color-secondary);
-  color: var(--color-secondary-foreground);
+  /* Gold chip (mockup v6): fill = gold-100, dashed border = gold-400, text =
+     gold-700 — all design tokens, not the mockup's raw hexes. */
+  background-color: var(--color-gold-100);
+  border: 1px dashed var(--color-gold-400);
+  color: var(--color-gold-700);
   font-family: var(--font-sans);
   font-size: 0.9em;
+  font-weight: 600;
   white-space: nowrap;
 }
 

@@ -928,6 +928,11 @@ enum ModuleElementType {
   text
   image
   fillable_field // Reserved; fillable fields normally nest inside text content.
+  // A positioned multiple-choice block (Module Editor mockup v6). content JSON:
+  // { question, options: [{ text, correct }], allowMultiple }. The `correct`
+  // flags are the AUTHOR's answer key; grading a learner's response is the
+  // deferred Quiz/Scoring subsystem's job, not this element.
+  multiple_choice
 }
 
 enum ModuleDecisionType {

@@ -1,7 +1,11 @@
 // Shared types for the Module Editor surface (plain module — no directive — so
 // both the server actions and the client canvas can import it).
 
-export type ModuleElementType = "text" | "image" | "fillable_field";
+export type ModuleElementType =
+  | "text"
+  | "image"
+  | "fillable_field"
+  | "multiple_choice";
 export type ModuleStatus =
   | "draft"
   | "pending_review"
@@ -16,6 +20,19 @@ export type AiAttestation =
 export interface ImageContent {
   src: string;
   alt: string;
+}
+
+// Multiple-choice element content. `correct` is the author's answer key;
+// learner scoring is the deferred Quiz/Scoring subsystem's concern, not stored
+// here beyond the key itself.
+export interface MCOption {
+  text: string;
+  correct: boolean;
+}
+export interface MultipleChoiceContent {
+  question: string;
+  options: MCOption[];
+  allowMultiple: boolean;
 }
 
 export interface EditorElement {

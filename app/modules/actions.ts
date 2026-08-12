@@ -116,6 +116,21 @@ export async function deletePageAction(
 // --- elements ----------------------------------------------------------------
 
 const DEFAULT_TEXT_CONTENT = { type: "doc", content: [{ type: "paragraph" }] };
+const DEFAULT_MC_CONTENT = {
+  question: "",
+  options: [
+    { text: "", correct: false },
+    { text: "", correct: false },
+  ],
+  allowMultiple: false,
+};
+// Default element size as PERCENT of the 4:3 canvas.
+const DEFAULT_SIZES: Record<ModuleElementType, { w: number; h: number }> = {
+  text: { w: 84, h: 16 },
+  image: { w: 50, h: 40 },
+  fillable_field: { w: 30, h: 8 },
+  multiple_choice: { w: 84, h: 62 },
+};
 
 export async function addElementAction(
   moduleId: string,
@@ -136,13 +151,17 @@ export async function addElementAction(
         ? DEFAULT_TEXT_CONTENT
         : elementType === "image"
           ? { src: "", alt: "" }
-          : { label: "Fill in" };
+          : elementType === "multiple_choice"
+            ? DEFAULT_MC_CONTENT
+            : { label: "Fill in" };
+    // Positions/sizes are PERCENT of the 4:3 canvas (0–100), resolution-neutral.
+    const size = DEFAULT_SIZES[elementType];
     const el = await createElement(pageId, {
       element_type: elementType,
-      position_x: 24,
-      position_y: 24,
-      width: elementType === "image" ? 240 : 320,
-      height: elementType === "image" ? 180 : 120,
+      position_x: 8,
+      position_y: 8,
+      width: size.w,
+      height: size.h,
       z_index: zIndex,
       content,
     });

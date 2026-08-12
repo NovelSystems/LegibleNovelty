@@ -21,12 +21,21 @@ export default async function EditModulePage({
     where: { module_id: moduleId },
     include: {
       primary_seed_revision: {
-        select: { title: true, learning_objective: true },
+        select: { title: true, curriculum_load: true },
       },
     },
   });
   // Owner-only; a stranger or missing module 404s.
   if (!module || module.author_account_id !== accountId) notFound();
+
+  const CURRICULUM_LABELS: Record<string, string> = {
+    worksheet: "Worksheet",
+    short_unit: "Short unit",
+    extended_unit: "Extended unit",
+  };
+  const curriculumLoadLabel = module.primary_seed_revision.curriculum_load
+    ? CURRICULUM_LABELS[module.primary_seed_revision.curriculum_load]
+    : null;
 
   const tree = await getModuleTree(moduleId);
   const pages: EditorPage[] = tree.map((p) => ({
@@ -56,8 +65,8 @@ export default async function EditModulePage({
       initialAttestation={module.ai_attestation}
       initialPages={pages}
       maxPages={maxPages}
+      curriculumLoadLabel={curriculumLoadLabel}
       seedTitle={module.primary_seed_revision.title ?? ""}
-      seedObjective={module.primary_seed_revision.learning_objective}
       authorName={session.user?.name ?? "You"}
     />
   );

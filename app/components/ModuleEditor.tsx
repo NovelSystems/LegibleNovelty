@@ -1,7 +1,19 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import {
+  Type,
+  Image as ImageIcon,
+  FormInput,
+  ListChecks,
+  BringToFront,
+  SendToBack,
+  Trash2,
+  Plus,
+  Minus,
+  X,
+} from "lucide-react";
 import {
   addPageAction,
   deletePageAction,
@@ -17,36 +29,15 @@ import type {
   EditorPage,
   EditorElement,
   ImageContent,
+  MultipleChoiceContent,
   ModuleStatus,
+  ModuleElementType,
   AiAttestation,
 } from "@/app/modules/types";
 import { TextElementEditor } from "./TextElementEditor";
 
-const CANVAS_WIDTH = 816; // ~ US Letter at 96dpi; a fixed authoring frame.
-const CANVAS_MIN_HEIGHT = 560;
-
-type TipTapNode = {
-  type?: string;
-  text?: string;
-  attrs?: Record<string, unknown>;
-  content?: TipTapNode[];
-};
-
-// Cheap plain-text preview of a text element's TipTap doc for the canvas tile.
-function plainText(json: unknown): string {
-  const walk = (nodes?: TipTapNode[]): string => {
-    let out = "";
-    for (const n of nodes ?? []) {
-      if (n.type === "text" && typeof n.text === "string") out += n.text;
-      else if (n.type === "fillableField")
-        out += `[${(n.attrs?.label as string) ?? "Fill in"}]`;
-      if (n.content) out += walk(n.content);
-      if (n.type === "paragraph") out += " ";
-    }
-    return out;
-  };
-  return walk((json as { content?: TipTapNode[] } | null)?.content).trim();
-}
+// Positions/sizes are PERCENT (0–100) of the fixed 4:3 canvas — resolution-neutral.
+const MIN_PCT = 4;
 
 export function ModuleEditor({
   moduleId,
@@ -54,8 +45,8 @@ export function ModuleEditor({
   initialAttestation,
   initialPages,
   maxPages,
+  curriculumLoadLabel,
   seedTitle,
-  seedObjective,
   authorName,
 }: {
   moduleId: string;
@@ -63,112 +54,140 @@ export function ModuleEditor({
   initialAttestation: AiAttestation | null;
   initialPages: EditorPage[];
   maxPages: number | null; // null = no cap
+  curriculumLoadLabel: string | null; // e.g. "Worksheet" for the cap note
   seedTitle: string;
-  seedObjective: string;
   authorName: string;
 }) {
   const router = useRouter();
   const [pages, setPages] = useState<EditorPage[]>(initialPages);
-  const [attestation, setAttestation] = useState<AiAttestation | null>(
-    initialAttestation,
+  const [currentPageId, setCurrentPageId] = useState<string | null>(
+    initialPages[0]?.pageId ?? null,
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const [drag, setDrag] = useState<{
-    elementId: string;
-    startX: number;
-    startY: number;
-    origX: number;
-    origY: number;
-  } | null>(null);
+  const [showSubmit, setShowSubmit] = useState(false);
+  const activeEditor = useRef<Parameters<
+    NonNullable<React.ComponentProps<typeof TextElementEditor>["onActive"]>
+  >[0] | null>(null);
 
   const editable = status === "draft";
-  const totalPages = pages.length;
-  const atPageCap = maxPages != null && totalPages >= maxPages;
-
-  const selected = useMemo(
-    () =>
-      pages.flatMap((p) => p.elements).find((e) => e.elementId === selectedId) ??
-      null,
-    [pages, selectedId],
+  const currentPage = useMemo(
+    () => pages.find((p) => p.pageId === currentPageId) ?? pages[0] ?? null,
+    [pages, currentPageId],
   );
+  const currentIndex = pages.findIndex((p) => p.pageId === currentPage?.pageId);
+  const atPageCap = maxPages != null && pages.length >= maxPages;
+  const selected =
+    currentPage?.elements.find((e) => e.elementId === selectedId) ?? null;
 
-  function patchElement(elementId: string, patch: Partial<EditorElement>) {
-    setPages((prev) =>
-      prev.map((p) => ({
-        ...p,
-        elements: p.elements.map((e) =>
-          e.elementId === elementId ? { ...e, ...patch } : e,
-        ),
-      })),
-    );
-  }
-
-  function run<T>(action: Promise<T>, onOk?: (r: T) => void) {
+  function run<T extends { ok: boolean; error?: string }>(
+    action: Promise<T>,
+    onOk?: (r: T) => void,
+  ) {
     setError(null);
     startTransition(async () => {
-      const res = (await action) as { ok: boolean; error?: string };
+      const res = await action;
       if (!res.ok) {
         setError(res.error ?? "Something went wrong.");
         return;
       }
-      onOk?.(res as T);
+      onOk?.(res);
     });
+  }
+
+  function patchElement(pageId: string, elementId: string, patch: Partial<EditorElement>) {
+    setPages((prev) =>
+      prev.map((p) =>
+        p.pageId !== pageId
+          ? p
+          : {
+              ...p,
+              elements: p.elements.map((e) =>
+                e.elementId === elementId ? { ...e, ...patch } : e,
+              ),
+            },
+      ),
+    );
   }
 
   // --- pages ---
   function onAddPage() {
-    run(addPageAction(moduleId), (res) => {
-      const r = res as { ok: true; pageId: string; pageOrder: number };
-      setPages((prev) => [
-        ...prev,
-        { pageId: r.pageId, pageOrder: r.pageOrder, elements: [] },
-      ]);
+    run(addPageAction(moduleId), (r) => {
+      const rr = r as { ok: true; pageId: string; pageOrder: number };
+      setPages((prev) => [...prev, { pageId: rr.pageId, pageOrder: rr.pageOrder, elements: [] }]);
+      setCurrentPageId(rr.pageId);
     });
   }
   function onDeletePage(pageId: string) {
-    run(deletePageAction(moduleId, pageId), () =>
-      setPages((prev) => prev.filter((p) => p.pageId !== pageId)),
-    );
+    run(deletePageAction(moduleId, pageId), () => {
+      setPages((prev) => {
+        const next = prev.filter((p) => p.pageId !== pageId);
+        if (currentPageId === pageId) setCurrentPageId(next[0]?.pageId ?? null);
+        return next;
+      });
+    });
   }
 
   // --- elements ---
-  function onAddElement(pageId: string, type: EditorElement["elementType"]) {
-    const z =
-      Math.max(0, ...pages.flatMap((p) => p.elements).map((e) => e.zIndex)) + 1;
-    run(addElementAction(moduleId, pageId, type, z), (res) => {
-      const r = res as { ok: true; elementId: string };
+  function onAddElement(type: ModuleElementType) {
+    if (!currentPage) return;
+    const z = Math.max(0, ...currentPage.elements.map((e) => e.zIndex)) + 1;
+    run(addElementAction(moduleId, currentPage.pageId, type, z), (r) => {
+      const rr = r as { ok: true; elementId: string };
+      const content =
+        type === "text"
+          ? null
+          : type === "image"
+            ? { src: "", alt: "" }
+            : type === "multiple_choice"
+              ? { question: "", options: [{ text: "", correct: false }, { text: "", correct: false }], allowMultiple: false }
+              : { label: "Fill in" };
+      const size =
+        type === "image" ? { w: 50, h: 40 } : type === "multiple_choice" ? { w: 84, h: 62 } : type === "fillable_field" ? { w: 30, h: 8 } : { w: 84, h: 16 };
       const el: EditorElement = {
-        elementId: r.elementId,
+        elementId: rr.elementId,
         elementType: type,
-        positionX: 24,
-        positionY: 24,
-        width: type === "image" ? 240 : 320,
-        height: type === "image" ? 180 : 120,
+        positionX: 8,
+        positionY: 8,
+        width: size.w,
+        height: size.h,
         zIndex: z,
-        content: type === "text" ? null : type === "image" ? { src: "", alt: "" } : { label: "Fill in" },
+        content,
       };
       setPages((prev) =>
-        prev.map((p) =>
-          p.pageId === pageId ? { ...p, elements: [...p.elements, el] } : p,
-        ),
+        prev.map((p) => (p.pageId === currentPage.pageId ? { ...p, elements: [...p.elements, el] } : p)),
       );
       setSelectedId(el.elementId);
     });
   }
-  function onDeleteElement(elementId: string) {
+
+  function onAddFillable() {
+    // Prefer inline insertion into a focused text editor; otherwise a standalone
+    // fillable element (the mockup's single toolbar button, reconciled to both).
+    const ed = activeEditor.current;
+    if (ed) {
+      ed.chain().focus().insertContent({ type: "fillableField", attrs: { label: "Fill in" } }).run();
+      return;
+    }
+    onAddElement("fillable_field");
+  }
+
+  function onDeleteSelected() {
+    if (!selected || !currentPage) return;
+    const { elementId } = selected;
+    const pageId = currentPage.pageId;
     run(deleteElementAction(moduleId, elementId), () => {
       setPages((prev) =>
-        prev.map((p) => ({
-          ...p,
-          elements: p.elements.filter((e) => e.elementId !== elementId),
-        })),
+        prev.map((p) =>
+          p.pageId === pageId ? { ...p, elements: p.elements.filter((e) => e.elementId !== elementId) } : p,
+        ),
       );
-      if (selectedId === elementId) setSelectedId(null);
+      setSelectedId(null);
     });
   }
-  function persistPosition(el: EditorElement) {
+
+  function persistGeometry(pageId: string, el: EditorElement) {
     run(
       moveElementAction(moduleId, el.elementId, {
         position_x: el.positionX,
@@ -180,290 +199,551 @@ export function ModuleEditor({
     );
   }
 
-  // --- drag to move ---
-  function onElementPointerDown(e: React.PointerEvent, el: EditorElement) {
-    if (!editable) return;
-    setSelectedId(el.elementId);
-    setDrag({
-      elementId: el.elementId,
-      startX: e.clientX,
-      startY: e.clientY,
-      origX: el.positionX,
-      origY: el.positionY,
-    });
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-  }
-  function onCanvasPointerMove(e: React.PointerEvent) {
-    if (!drag) return;
-    const nx = Math.max(0, drag.origX + (e.clientX - drag.startX));
-    const ny = Math.max(0, drag.origY + (e.clientY - drag.startY));
-    patchElement(drag.elementId, { positionX: Math.round(nx), positionY: Math.round(ny) });
-  }
-  function onCanvasPointerUp() {
-    if (!drag) return;
-    const el = pages.flatMap((p) => p.elements).find((x) => x.elementId === drag.elementId);
-    setDrag(null);
-    if (el) persistPosition(el);
+  function onLayer(dir: "front" | "back") {
+    if (!selected || !currentPage) return;
+    const zs = currentPage.elements.map((e) => e.zIndex);
+    const z = dir === "front" ? Math.max(...zs) + 1 : Math.min(...zs) - 1;
+    patchElement(currentPage.pageId, selected.elementId, { zIndex: z });
+    persistGeometry(currentPage.pageId, { ...selected, zIndex: z });
   }
 
-  // --- attestation + lifecycle ---
-  function onSetAttestation(value: AiAttestation) {
-    setAttestation(value);
-    run(setAttestationAction(moduleId, value));
+  function saveContent(pageId: string, elementId: string, content: unknown) {
+    patchElement(pageId, elementId, { content });
+    run(updateElementContentAction(moduleId, elementId, content as never));
   }
-  function onSubmit() {
-    run(submitModuleAction(moduleId), () => router.refresh());
+
+  // --- lifecycle ---
+  function onSubmitConfirmed(attestation: AiAttestation) {
+    setShowSubmit(false);
+    run(setAttestationAction(moduleId, attestation), () =>
+      run(submitModuleAction(moduleId), () => router.refresh()),
+    );
   }
   function onPublish() {
     run(publishModuleAction(moduleId), () => router.refresh());
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Top bar */}
-      <header className="sticky top-0 z-20 border-b border-border bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
-          <nav className="min-w-0 text-sm text-muted-foreground">
-            <a href="/seeds" className="hover:text-foreground">Seeds</a>
-            <span className="mx-2">/</span>
-            <span className="text-foreground">Module authoring</span>
-            <p className="truncate text-heading">
-              <span className="font-semibold">{seedTitle || "Untitled seed"}</span>
-              <span className="ml-2 text-sm text-muted-foreground">— {seedObjective}</span>
-            </p>
-          </nav>
-          <div className="flex items-center gap-3">
-            <StatusChip status={status} />
-            <span className="text-sm text-muted-foreground">
-              Pages {totalPages}
-              {maxPages != null ? ` / ${maxPages}` : ""}
-            </span>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-screen bg-white">
+      <TopNav authorName={authorName} />
 
-      <main className="mx-auto flex max-w-5xl gap-6 px-6 py-6">
-        {/* Canvas column */}
-        <div className="min-w-0 flex-1 space-y-8">
-          {pages.length === 0 && (
-            <p className="rounded-lg border border-border bg-white p-8 text-center text-muted-foreground">
-              No pages yet.{editable ? " Add the first page to start authoring." : ""}
+      {/* Breadcrumb + element toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-4">
+        <div className="text-sm text-muted-foreground">
+          Workshop / Modules / <span className="text-foreground">{seedTitle || "Untitled"}</span>
+        </div>
+        {editable && (
+          <div className="flex items-center gap-1">
+            <ToolbarBtn title="Text" onClick={() => onAddElement("text")}><Type size={16} /></ToolbarBtn>
+            <ToolbarBtn title="Image" onClick={() => onAddElement("image")}><ImageIcon size={16} /></ToolbarBtn>
+            <ToolbarBtn title="Fillable field" onClick={onAddFillable}><FormInput size={16} /></ToolbarBtn>
+            <ToolbarBtn title="Multiple choice" onClick={() => onAddElement("multiple_choice")}><ListChecks size={16} /></ToolbarBtn>
+            <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+            <ToolbarBtn title="Bring forward" tone="accent" disabled={!selected} onClick={() => onLayer("front")}><BringToFront size={16} /></ToolbarBtn>
+            <ToolbarBtn title="Send back" tone="accent" disabled={!selected} onClick={() => onLayer("back")}><SendToBack size={16} /></ToolbarBtn>
+            <ToolbarBtn title="Delete" tone="danger" disabled={!selected} onClick={onDeleteSelected}><Trash2 size={16} /></ToolbarBtn>
+          </div>
+        )}
+      </div>
+
+      {/* Pages sidebar + canvas */}
+      <div className="grid grid-cols-[150px_minmax(0,1fr)] gap-4 px-6 py-4">
+        <PagesSidebar
+          pages={pages}
+          currentPageId={currentPage?.pageId ?? null}
+          editable={editable}
+          atPageCap={atPageCap}
+          maxPages={maxPages}
+          curriculumLoadLabel={curriculumLoadLabel}
+          pending={pending}
+          onSelect={(id) => { setCurrentPageId(id); setSelectedId(null); }}
+          onAddPage={onAddPage}
+          onDeletePage={onDeletePage}
+        />
+
+        <div className="flex flex-col items-center">
+          {currentPage ? (
+            <Canvas
+              key={currentPage.pageId}
+              page={currentPage}
+              editable={editable}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onLiveGeometry={(elementId, patch) => patchElement(currentPage.pageId, elementId, patch)}
+              onCommitGeometry={(el) => persistGeometry(currentPage.pageId, el)}
+              onSaveContent={(elementId, content) => saveContent(currentPage.pageId, elementId, content)}
+              registerActive={(ed) => { activeEditor.current = ed; }}
+            />
+          ) : (
+            <p className="rounded-lg border border-border bg-gray-50 p-10 text-center text-muted-foreground">
+              {editable ? "No pages yet — add the first page to start." : "This module has no pages."}
             </p>
           )}
+          <p className="mt-2 text-xs text-gray-400">
+            Drag to move, drag a corner to resize. Layer and delete act on the current selection.
+          </p>
+        </div>
+      </div>
 
-          {pages.map((page, i) => (
-            <section key={page.pageId}>
-              <div className="mb-2 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-heading">Page {i + 1}</h2>
-                {editable && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <button type="button" className="text-foreground hover:underline" onClick={() => onAddElement(page.pageId, "text")}>+ Text</button>
-                    <button type="button" className="text-foreground hover:underline" onClick={() => onAddElement(page.pageId, "image")}>+ Image</button>
-                    <button type="button" className="text-danger-text hover:underline" onClick={() => onDeletePage(page.pageId)}>Delete page</button>
-                  </div>
-                )}
-              </div>
-              <div
-                className="relative overflow-hidden rounded-md border border-gray-300 bg-white shadow-sm"
-                style={{ width: CANVAS_WIDTH, minHeight: CANVAS_MIN_HEIGHT, maxWidth: "100%" }}
-                onPointerMove={onCanvasPointerMove}
-                onPointerUp={onCanvasPointerUp}
-              >
-                {page.elements.map((el) => (
-                  <ElementTile
-                    key={el.elementId}
-                    el={el}
-                    selected={selectedId === el.elementId}
-                    editable={editable}
-                    onPointerDown={(e) => onElementPointerDown(e, el)}
-                    onSelect={() => setSelectedId(el.elementId)}
-                    preview={el.elementType === "text" ? plainText(el.content) : undefined}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
-
-          {editable && (
-            <button
-              type="button"
-              onClick={onAddPage}
-              disabled={pending || atPageCap}
-              className="rounded-md border border-border bg-white px-4 py-2 text-base font-medium text-foreground hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-              title={atPageCap ? "This module is at its page limit for its curriculum load." : undefined}
-            >
-              {atPageCap ? `Page limit reached (${maxPages})` : "+ Add page"}
+      {/* Bottom bar */}
+      <div className="border-t border-border px-6 py-4">
+        <div className="mb-3 flex items-center gap-3">
+          <StatusChip status={status} />
+          {currentPage && (
+            <span className="text-sm text-muted-foreground">
+              Page {currentIndex + 1} of {pages.length}
+            </span>
+          )}
+          <span className="min-h-4 flex-1 text-sm text-danger-text" aria-live="polite">{error}</span>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={() => router.push("/seeds")} className="rounded-md border border-border bg-white px-4 py-2 text-base text-foreground hover:bg-gray-50">
+            Save and exit
+          </button>
+          {status === "draft" && (
+            <button type="button" onClick={() => setShowSubmit(true)} disabled={pending} className="rounded-md bg-primary px-4 py-2 text-base font-bold text-primary-foreground hover:bg-primary-hover active:bg-primary-active disabled:bg-primary-disabled">
+              Submit for review
+            </button>
+          )}
+          {status === "pending_review" && (
+            <button type="button" onClick={onPublish} disabled={pending} className="rounded-md bg-primary px-4 py-2 text-base font-bold text-primary-foreground hover:bg-primary-hover active:bg-primary-active disabled:bg-primary-disabled">
+              {pending ? "Working…" : "Publish"}
             </button>
           )}
         </div>
-
-        {/* Side panel */}
-        <aside className="w-80 shrink-0 space-y-6">
-          {editable && selected ? (
-            <PropertiesPanel
-              key={selected.elementId}
-              el={selected}
-              onChangePosition={(patch) => {
-                patchElement(selected.elementId, patch);
-              }}
-              onCommitPosition={() => {
-                const el = pages.flatMap((p) => p.elements).find((x) => x.elementId === selected.elementId);
-                if (el) persistPosition(el);
-              }}
-              onSaveContent={(content) => {
-                patchElement(selected.elementId, { content });
-                run(updateElementContentAction(moduleId, selected.elementId, content as never));
-              }}
-              onDelete={() => onDeleteElement(selected.elementId)}
-            />
-          ) : editable ? (
-            <div className="rounded-lg border border-border bg-white p-4 text-sm text-muted-foreground">
-              Select an element to edit it, or add a page and elements.
-            </div>
-          ) : null}
-
-          <AttestationBar
-            status={status}
-            attestation={attestation}
-            editable={editable}
-            pending={pending}
-            onSet={onSetAttestation}
-            onSubmit={onSubmit}
-            onPublish={onPublish}
-          />
-
-          <div className="min-h-5 text-sm" aria-live="polite">
-            {error && <span className="text-danger-text">{error}</span>}
-          </div>
-          <p className="text-xs text-muted-foreground">Authoring by {authorName}.</p>
-        </aside>
-      </main>
-    </div>
-  );
-}
-
-function ElementTile({
-  el,
-  selected,
-  editable,
-  onPointerDown,
-  onSelect,
-  preview,
-}: {
-  el: EditorElement;
-  selected: boolean;
-  editable: boolean;
-  onPointerDown: (e: React.PointerEvent) => void;
-  onSelect: () => void;
-  preview?: string;
-}) {
-  const img = el.elementType === "image" ? (el.content as ImageContent | null) : null;
-  return (
-    <div
-      onPointerDown={onPointerDown}
-      onClick={onSelect}
-      className={`absolute overflow-hidden rounded border ${selected ? "border-primary ring-2 ring-ring/40" : "border-gray-200"} bg-white ${editable ? "cursor-move" : ""}`}
-      style={{
-        left: el.positionX,
-        top: el.positionY,
-        width: el.width,
-        height: el.height,
-        zIndex: el.zIndex,
-      }}
-    >
-      {el.elementType === "text" && (
-        <div className="module-content h-full w-full overflow-hidden p-2 text-sm text-gray-800">
-          {preview || <span className="text-muted-foreground">Empty text — select to edit</span>}
-        </div>
-      )}
-      {el.elementType === "image" &&
-        (img?.src ? (
-          <img src={img.src} alt={img.alt} className="h-full w-full object-contain" />
-        ) : (
-          <div className="grid h-full w-full place-items-center text-sm text-muted-foreground">Image — set a source</div>
-        ))}
-      {el.elementType === "fillable_field" && (
-        <div className="grid h-full w-full place-items-center text-sm text-secondary-foreground">
-          Fillable field
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PropertiesPanel({
-  el,
-  onChangePosition,
-  onCommitPosition,
-  onSaveContent,
-  onDelete,
-}: {
-  el: EditorElement;
-  onChangePosition: (patch: Partial<EditorElement>) => void;
-  onCommitPosition: () => void;
-  onSaveContent: (content: unknown) => void;
-  onDelete: () => void;
-}) {
-  const num = (v: string) => Math.max(0, Math.round(Number(v) || 0));
-  const field = "w-full rounded-md border border-input bg-white px-2 py-1 text-sm";
-  return (
-    <div className="space-y-3 rounded-lg border border-border bg-white p-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-heading capitalize">{el.elementType.replace("_", " ")}</h3>
-        <button type="button" className="text-sm text-danger-text hover:underline" onClick={onDelete}>Delete</button>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        {(["positionX", "positionY", "width", "height", "zIndex"] as const).map((k) => (
-          <label key={k} className="text-xs text-muted-foreground">
-            {k}
-            <input
-              type="number"
-              className={field}
-              value={el[k]}
-              onChange={(e) => onChangePosition({ [k]: num(e.target.value) } as Partial<EditorElement>)}
-              onBlur={onCommitPosition}
-            />
-          </label>
-        ))}
-      </div>
-
-      {el.elementType === "text" && (
-        <TextElementEditor initialContent={el.content} onSave={onSaveContent} />
-      )}
-      {el.elementType === "image" && (
-        <ImageFields
-          content={(el.content as ImageContent | null) ?? { src: "", alt: "" }}
-          onSave={onSaveContent}
+      {showSubmit && (
+        <SubmitModal
+          initial={initialAttestation}
+          pending={pending}
+          onCancel={() => setShowSubmit(false)}
+          onConfirm={onSubmitConfirmed}
         />
       )}
     </div>
   );
 }
 
-function ImageFields({
+// --- top nav -----------------------------------------------------------------
+
+function TopNav({ authorName }: { authorName: string }) {
+  const tab = "text-sm";
+  return (
+    <header className="flex items-center justify-between border-b border-border px-6 py-3">
+      <div className="flex items-center gap-7">
+        <span className="text-[15px] font-bold text-primary">Legible Novelty</span>
+        <nav className="flex gap-5 text-muted-foreground">
+          <a href="/seeds" className={`${tab} hover:text-foreground`}>Seeds</a>
+          <span className={`${tab} border-b-2 border-primary pb-3.5 font-bold text-primary`}>Modules</span>
+          <span className={`${tab} text-gray-400`}>Lessons</span>
+          <span className={`${tab} text-gray-400`}>Library</span>
+        </nav>
+      </div>
+      <span className="grid h-8 w-8 place-items-center rounded-full bg-secondary text-xs font-bold text-secondary-foreground" title={authorName}>
+        {initials(authorName)}
+      </span>
+    </header>
+  );
+}
+
+function ToolbarBtn({
+  title,
+  onClick,
+  disabled,
+  tone,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  disabled?: boolean;
+  tone?: "accent" | "danger";
+  children: React.ReactNode;
+}) {
+  const toneCls =
+    tone === "danger"
+      ? "border-danger-500 text-danger-text bg-danger-50"
+      : tone === "accent"
+        ? "border-primary text-primary bg-teal-50"
+        : "border-border text-foreground bg-white hover:bg-gray-50";
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      disabled={disabled}
+      className={`grid h-8 w-8 place-items-center rounded-md border ${toneCls} disabled:cursor-not-allowed disabled:opacity-40`}
+    >
+      {children}
+    </button>
+  );
+}
+
+// --- pages sidebar -----------------------------------------------------------
+
+function PagesSidebar({
+  pages,
+  currentPageId,
+  editable,
+  atPageCap,
+  maxPages,
+  curriculumLoadLabel,
+  pending,
+  onSelect,
+  onAddPage,
+  onDeletePage,
+}: {
+  pages: EditorPage[];
+  currentPageId: string | null;
+  editable: boolean;
+  atPageCap: boolean;
+  maxPages: number | null;
+  curriculumLoadLabel: string | null;
+  pending: boolean;
+  onSelect: (id: string) => void;
+  onAddPage: () => void;
+  onDeletePage: (id: string) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Pages</div>
+      {pages.map((p, i) => {
+        const active = p.pageId === currentPageId;
+        return (
+          <div key={p.pageId} className={`mb-2 rounded-md border p-1 ${active ? "border-2 border-primary bg-gray-50" : "border-border"}`}>
+            <button type="button" onClick={() => onSelect(p.pageId)} className="block w-full">
+              <span className="block h-16 rounded-sm border border-border bg-white" />
+              <span className={`mt-1 block text-center text-[11px] ${active ? "font-bold text-primary" : "text-muted-foreground"}`}>Page {i + 1}</span>
+            </button>
+            {editable && pages.length > 1 && (
+              <button type="button" onClick={() => onDeletePage(p.pageId)} className="mt-1 block w-full text-center text-[10px] text-danger-text hover:underline">Delete</button>
+            )}
+          </div>
+        );
+      })}
+      {editable && (
+        <>
+          <button
+            type="button"
+            onClick={onAddPage}
+            disabled={pending || atPageCap}
+            className="w-full rounded-md border border-dashed border-gray-300 bg-gray-50 p-2 text-xs text-muted-foreground hover:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-400"
+          >
+            + Add page
+          </button>
+          {atPageCap && (
+            <div className="mt-1 text-center text-[10px] text-accent-text">
+              {curriculumLoadLabel ?? "Page"} cap reached ({maxPages})
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// --- canvas ------------------------------------------------------------------
+
+type Editor = NonNullable<
+  Parameters<NonNullable<React.ComponentProps<typeof TextElementEditor>["onActive"]>>[0]
+>;
+
+function Canvas({
+  page,
+  editable,
+  selectedId,
+  onSelect,
+  onLiveGeometry,
+  onCommitGeometry,
+  onSaveContent,
+  registerActive,
+}: {
+  page: EditorPage;
+  editable: boolean;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onLiveGeometry: (elementId: string, patch: Partial<EditorElement>) => void;
+  onCommitGeometry: (el: EditorElement) => void;
+  onSaveContent: (elementId: string, content: unknown) => void;
+  registerActive: (ed: Editor | null) => void;
+}) {
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{
+    el: EditorElement;
+    corner: "move" | "nw" | "ne" | "sw" | "se";
+    startX: number;
+    startY: number;
+  } | null>(null);
+
+  function pct(dxPx: number, dyPx: number) {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    return {
+      dx: rect ? (dxPx / rect.width) * 100 : 0,
+      dy: rect ? (dyPx / rect.height) * 100 : 0,
+    };
+  }
+
+  function begin(
+    e: React.PointerEvent,
+    el: EditorElement,
+    corner: "move" | "nw" | "ne" | "sw" | "se",
+  ) {
+    if (!editable) return;
+    e.stopPropagation();
+    onSelect(el.elementId);
+    drag.current = { el, corner, startX: e.clientX, startY: e.clientY };
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+  }
+  function onMove(e: React.PointerEvent) {
+    const d = drag.current;
+    if (!d) return;
+    const { dx, dy } = pct(e.clientX - d.startX, e.clientY - d.startY);
+    const g = { ...d.el };
+    const clamp = (v: number) => Math.max(0, Math.min(100, v));
+    if (d.corner === "move") {
+      g.positionX = clamp(d.el.positionX + dx);
+      g.positionY = clamp(d.el.positionY + dy);
+    } else {
+      if (d.corner.includes("e")) g.width = Math.max(MIN_PCT, d.el.width + dx);
+      if (d.corner.includes("s")) g.height = Math.max(MIN_PCT, d.el.height + dy);
+      if (d.corner.includes("w")) { g.width = Math.max(MIN_PCT, d.el.width - dx); g.positionX = d.el.positionX + dx; }
+      if (d.corner.includes("n")) { g.height = Math.max(MIN_PCT, d.el.height - dy); g.positionY = d.el.positionY + dy; }
+    }
+    onLiveGeometry(d.el.elementId, {
+      positionX: Math.round(g.positionX * 10) / 10,
+      positionY: Math.round(g.positionY * 10) / 10,
+      width: Math.round(g.width * 10) / 10,
+      height: Math.round(g.height * 10) / 10,
+    });
+    d.el = g;
+  }
+  function onUp() {
+    const d = drag.current;
+    drag.current = null;
+    if (d) onCommitGeometry(d.el);
+  }
+
+  return (
+    <div
+      ref={canvasRef}
+      onPointerMove={onMove}
+      onPointerUp={onUp}
+      onPointerDown={() => onSelect("")}
+      className="relative aspect-[4/3] w-full max-w-[680px] rounded-md border border-gray-300 bg-white shadow-sm"
+    >
+      {[...page.elements]
+        .sort((a, b) => a.zIndex - b.zIndex)
+        .map((el) => (
+          <ElementView
+            key={el.elementId}
+            el={el}
+            editable={editable}
+            selected={selectedId === el.elementId}
+            onBeginMove={(e) => begin(e, el, "move")}
+            onBeginResize={(e, corner) => begin(e, el, corner)}
+            onSaveContent={(content) => onSaveContent(el.elementId, content)}
+            registerActive={registerActive}
+          />
+        ))}
+    </div>
+  );
+}
+
+function ElementView({
+  el,
+  editable,
+  selected,
+  onBeginMove,
+  onBeginResize,
+  onSaveContent,
+  registerActive,
+}: {
+  el: EditorElement;
+  editable: boolean;
+  selected: boolean;
+  onBeginMove: (e: React.PointerEvent) => void;
+  onBeginResize: (e: React.PointerEvent, corner: "nw" | "ne" | "sw" | "se") => void;
+  onSaveContent: (content: unknown) => void;
+  registerActive: (ed: Editor | null) => void;
+}) {
+  const style: React.CSSProperties = {
+    left: `${el.positionX}%`,
+    top: `${el.positionY}%`,
+    width: `${el.width}%`,
+    height: `${el.height}%`,
+    zIndex: el.zIndex,
+  };
+  return (
+    <div
+      className={`absolute rounded border bg-white ${selected ? "border-2 border-primary" : "border-border"}`}
+      style={style}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      {/* move grip (draggable) */}
+      {editable && (
+        <span
+          onPointerDown={onBeginMove}
+          className="absolute -top-2 left-1 z-10 cursor-move rounded bg-primary px-1 text-[9px] font-bold text-primary-foreground"
+        >
+          move
+        </span>
+      )}
+
+      <div className="h-full w-full overflow-hidden">
+        {el.elementType === "text" && (
+          <TextElementEditor
+            initialContent={el.content}
+            editable={editable}
+            onSave={onSaveContent}
+            onActive={registerActive}
+          />
+        )}
+        {el.elementType === "image" && (
+          <ImageElement content={(el.content as ImageContent | null) ?? { src: "", alt: "" }} editable={editable} onSave={onSaveContent} />
+        )}
+        {el.elementType === "fillable_field" && (
+          <div className="grid h-full w-full place-items-center p-1">
+            <span className="fillable-field">
+              {((el.content as { label?: string } | null)?.label as string) ?? "Fill in"}
+            </span>
+          </div>
+        )}
+        {el.elementType === "multiple_choice" && (
+          <MultipleChoiceElement
+            content={(el.content as MultipleChoiceContent | null) ?? { question: "", options: [], allowMultiple: false }}
+            editable={editable}
+            onSave={onSaveContent}
+          />
+        )}
+      </div>
+
+      {/* resize corners */}
+      {editable && selected &&
+        (["nw", "ne", "sw", "se"] as const).map((c) => (
+          <span
+            key={c}
+            onPointerDown={(e) => onBeginResize(e, c)}
+            className="absolute z-10 h-2.5 w-2.5 rounded-[1px] border border-white bg-primary"
+            style={{
+              cursor: `${c}-resize`,
+              top: c[0] === "n" ? -5 : undefined,
+              bottom: c[0] === "s" ? -5 : undefined,
+              left: c[1] === "w" ? -5 : undefined,
+              right: c[1] === "e" ? -5 : undefined,
+            }}
+          />
+        ))}
+    </div>
+  );
+}
+
+// --- image element -----------------------------------------------------------
+
+function ImageElement({
   content,
+  editable,
   onSave,
 }: {
   content: ImageContent;
+  editable: boolean;
   onSave: (content: ImageContent) => void;
 }) {
   const [src, setSrc] = useState(content.src);
   const [alt, setAlt] = useState(content.alt);
-  const field = "w-full rounded-md border border-input bg-white px-2 py-1 text-sm";
+  if (!editable) {
+    return src ? (
+      <img src={src} alt={alt} className="h-full w-full object-contain" />
+    ) : (
+      <div className="grid h-full w-full place-items-center text-sm text-muted-foreground">Image</div>
+    );
+  }
   return (
-    <div className="space-y-2">
-      <label className="block text-xs text-muted-foreground">
-        Image source (URL)
-        <input className={field} value={src} onChange={(e) => setSrc(e.target.value)} onBlur={() => onSave({ src, alt })} placeholder="https://…" />
-      </label>
-      <label className="block text-xs text-muted-foreground">
-        Alt text
-        <input className={field} value={alt} onChange={(e) => setAlt(e.target.value)} onBlur={() => onSave({ src, alt })} placeholder="Describe the image" />
-      </label>
+    <div className="flex h-full flex-col">
+      <div className="min-h-0 flex-1">
+        {src ? (
+          <img src={src} alt={alt} className="h-full w-full object-contain" />
+        ) : (
+          <div className="grid h-full w-full place-items-center text-xs text-muted-foreground">No image yet</div>
+        )}
+      </div>
+      <div className="space-y-1 border-t border-border bg-gray-50 p-1">
+        <input className="w-full rounded border border-input px-1 py-0.5 text-xs" value={src} onChange={(e) => setSrc(e.target.value)} onBlur={() => onSave({ src, alt })} placeholder="Image URL" />
+        <input className="w-full rounded border border-input px-1 py-0.5 text-xs" value={alt} onChange={(e) => setAlt(e.target.value)} onBlur={() => onSave({ src, alt })} placeholder="Alt text" />
+      </div>
     </div>
   );
 }
+
+// --- multiple choice element -------------------------------------------------
+
+function MultipleChoiceElement({
+  content,
+  editable,
+  onSave,
+}: {
+  content: MultipleChoiceContent;
+  editable: boolean;
+  onSave: (content: MultipleChoiceContent) => void;
+}) {
+  const [mc, setMc] = useState<MultipleChoiceContent>(content);
+  function commit(next: MultipleChoiceContent) {
+    setMc(next);
+    onSave(next);
+  }
+  const inputCls = "min-w-0 flex-1 rounded border border-input px-1.5 py-0.5 text-xs";
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border p-1.5">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-muted-foreground">Options</span>
+          <div className="flex items-center overflow-hidden rounded border border-border">
+            <button type="button" disabled={!editable || mc.options.length <= 2} className="bg-gray-50 px-1.5 py-0.5 text-xs disabled:opacity-40" onClick={() => commit({ ...mc, options: mc.options.slice(0, -1) })}><Minus size={11} /></button>
+            <span className="px-2 text-xs font-bold text-foreground">{mc.options.length}</span>
+            <button type="button" disabled={!editable || mc.options.length >= 8} className="bg-gray-50 px-1.5 py-0.5 text-xs disabled:opacity-40" onClick={() => commit({ ...mc, options: [...mc.options, { text: "", correct: false }] })}><Plus size={11} /></button>
+          </div>
+        </div>
+        <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
+          <input type="checkbox" checked={mc.allowMultiple} disabled={!editable} onChange={(e) => commit({ ...mc, allowMultiple: e.target.checked })} />
+          Allow multiple answers
+        </label>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto p-2">
+        <input
+          className="module-content mb-2 w-full rounded border border-input px-1.5 py-1 text-xs"
+          value={mc.question}
+          disabled={!editable}
+          placeholder="Question…"
+          onChange={(e) => setMc({ ...mc, question: e.target.value })}
+          onBlur={() => onSave(mc)}
+        />
+        <div className="flex flex-col gap-1">
+          {mc.options.map((opt, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                title="Mark as a correct answer"
+                checked={opt.correct}
+                disabled={!editable}
+                onChange={(e) => commit({ ...mc, options: mc.options.map((o, j) => (j === i ? { ...o, correct: e.target.checked } : o)) })}
+              />
+              <input
+                className={inputCls}
+                value={opt.text}
+                disabled={!editable}
+                placeholder={`Option ${i + 1}`}
+                onChange={(e) => setMc({ ...mc, options: mc.options.map((o, j) => (j === i ? { ...o, text: e.target.value } : o)) })}
+                onBlur={() => onSave(mc)}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- submit modal (attestation) ---------------------------------------------
 
 const ATTESTATIONS: { value: AiAttestation; label: string; hint: string }[] = [
   { value: "wholly_human", label: "Wholly human", hint: "No AI used in authoring." },
@@ -471,77 +751,47 @@ const ATTESTATIONS: { value: AiAttestation; label: string; hint: string }[] = [
   { value: "ai_pipeline", label: "AI pipeline", hint: "Generated by an AI pipeline. Locks once set." },
 ];
 
-function AttestationBar({
-  status,
-  attestation,
-  editable,
+function SubmitModal({
+  initial,
   pending,
-  onSet,
-  onSubmit,
-  onPublish,
+  onCancel,
+  onConfirm,
 }: {
-  status: ModuleStatus;
-  attestation: AiAttestation | null;
-  editable: boolean;
+  initial: AiAttestation | null;
   pending: boolean;
-  onSet: (v: AiAttestation) => void;
-  onSubmit: () => void;
-  onPublish: () => void;
+  onCancel: () => void;
+  onConfirm: (a: AiAttestation) => void;
 }) {
+  const [value, setValue] = useState<AiAttestation | null>(initial);
   return (
-    <div className="space-y-3 rounded-lg border border-border bg-white p-4">
-      <div>
-        <h3 className="text-sm font-semibold text-heading">How was this made?</h3>
-        <p className="mt-1 text-xs text-muted-foreground">
-          AI-assisted work is welcome here. This isn&apos;t a penalty — a declared human
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" role="dialog" aria-modal="true">
+      <div className="w-full max-w-md rounded-lg border border-border bg-white p-6 shadow-md">
+        <div className="mb-3 flex items-start justify-between">
+          <h2 className="text-xl text-heading">How was this module made?</h2>
+          <button type="button" onClick={onCancel} aria-label="Close" className="text-muted-foreground hover:text-foreground"><X size={18} /></button>
+        </div>
+        <p className="mb-4 text-sm text-muted-foreground">
+          AI-assisted work is welcome here. This isn&apos;t a penalty — declaring human
           authorship simply earns a discoverability boost in search.
         </p>
+        <div className="space-y-2">
+          {ATTESTATIONS.map((a) => (
+            <label key={a.value} className={`flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm ${value === a.value ? "border-primary bg-secondary" : "border-border"}`}>
+              <input type="radio" name="att" className="mt-1" checked={value === a.value} onChange={() => setValue(a.value)} />
+              <span>
+                <span className="font-medium text-foreground">{a.label}</span>
+                <span className="block text-xs text-muted-foreground">{a.hint}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={onCancel} className="rounded-md border border-border bg-white px-4 py-2 text-base text-foreground hover:bg-gray-50">Cancel</button>
+          <button type="button" disabled={pending || value == null} onClick={() => value && onConfirm(value)} className="rounded-md bg-primary px-4 py-2 text-base font-bold text-primary-foreground hover:bg-primary-hover disabled:bg-primary-disabled">
+            {pending ? "Working…" : "Submit for review"}
+          </button>
+        </div>
       </div>
-      <div className="space-y-1">
-        {ATTESTATIONS.map((a) => (
-          <label
-            key={a.value}
-            className={`flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm ${attestation === a.value ? "border-primary bg-secondary" : "border-border"} ${!editable ? "opacity-70" : ""}`}
-          >
-            <input
-              type="radio"
-              name="attestation"
-              className="mt-1"
-              checked={attestation === a.value}
-              disabled={!editable || attestation === "ai_pipeline"}
-              onChange={() => onSet(a.value)}
-            />
-            <span>
-              <span className="font-medium text-foreground">{a.label}</span>
-              <span className="block text-xs text-muted-foreground">{a.hint}</span>
-            </span>
-          </label>
-        ))}
-      </div>
-
-      {status === "draft" && (
-        <button
-          type="button"
-          onClick={onSubmit}
-          disabled={pending || attestation == null}
-          className="w-full rounded-md bg-primary px-4 py-2 text-base font-medium text-primary-foreground hover:bg-primary-hover active:bg-primary-active disabled:cursor-not-allowed disabled:bg-primary-disabled"
-        >
-          {pending ? "Working…" : "Submit for review"}
-        </button>
-      )}
-      {status === "pending_review" && (
-        <button
-          type="button"
-          onClick={onPublish}
-          disabled={pending}
-          className="w-full rounded-md bg-primary px-4 py-2 text-base font-medium text-primary-foreground hover:bg-primary-hover active:bg-primary-active disabled:cursor-not-allowed disabled:bg-primary-disabled"
-        >
-          {pending ? "Working…" : "Publish"}
-        </button>
-      )}
-      {status === "published" && (
-        <p className="text-sm text-secondary-foreground">This module is published.</p>
-      )}
     </div>
   );
 }
@@ -554,5 +804,12 @@ function StatusChip({ status }: { status: ModuleStatus }) {
     published: { label: "Published", cls: "bg-teal-100 text-teal-700" },
   };
   const s = map[status];
-  return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${s.cls}`}>{s.label}</span>;
+  return <span className={`rounded px-2.5 py-1 text-xs font-bold ${s.cls}`}>{s.label}</span>;
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
