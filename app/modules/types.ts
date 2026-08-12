@@ -22,18 +22,10 @@ export interface ImageContent {
   alt: string;
 }
 
-// Multiple-choice element content. `correct` is the author's answer key;
-// learner scoring is the deferred Quiz/Scoring subsystem's concern, not stored
-// here beyond the key itself.
-export interface MCOption {
-  text: string;
-  correct: boolean;
-}
-export interface MultipleChoiceContent {
-  question: string;
-  options: MCOption[];
-  allowMultiple: boolean;
-}
+// Multiple-choice content is canonically defined (and validated) in the backend
+// authoring lib; re-export the type so the UI shares one shape. Content/format
+// only — no correctness/scoring (that's the deferred Quiz sub-stage).
+export type { MCOption, MultipleChoiceContent } from "@/lib/module-authoring";
 
 export interface EditorElement {
   elementId: string;

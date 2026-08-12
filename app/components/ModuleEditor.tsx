@@ -20,6 +20,7 @@ import {
   addElementAction,
   moveElementAction,
   updateElementContentAction,
+  updateMultipleChoiceContentAction,
   deleteElementAction,
   setAttestationAction,
   submitModuleAction,
@@ -38,6 +39,10 @@ import { TextElementEditor } from "./TextElementEditor";
 
 // Positions/sizes are PERCENT (0–100) of the fixed 4:3 canvas — resolution-neutral.
 const MIN_PCT = 4;
+// Client mirror of the authoritative bounds in lib/module-authoring.ts
+// (MIN_MC_OPTIONS / MAX_MC_OPTIONS) — the server validator enforces them.
+const MC_MIN_OPTIONS = 2;
+const MC_MAX_OPTIONS = 10;
 
 export function ModuleEditor({
   moduleId,
@@ -141,7 +146,14 @@ export function ModuleEditor({
           : type === "image"
             ? { src: "", alt: "" }
             : type === "multiple_choice"
-              ? { question: "", options: [{ text: "", correct: false }, { text: "", correct: false }], allowMultiple: false }
+              ? {
+                  stem: "",
+                  allow_multiple: false,
+                  options: [
+                    { id: crypto.randomUUID(), label: "" },
+                    { id: crypto.randomUUID(), label: "" },
+                  ],
+                }
               : { label: "Fill in" };
       const size =
         type === "image" ? { w: 50, h: 40 } : type === "multiple_choice" ? { w: 84, h: 62 } : type === "fillable_field" ? { w: 30, h: 8 } : { w: 84, h: 16 };
@@ -209,7 +221,14 @@ export function ModuleEditor({
 
   function saveContent(pageId: string, elementId: string, content: unknown) {
     patchElement(pageId, elementId, { content });
-    run(updateElementContentAction(moduleId, elementId, content as never));
+    const el = pages.find((p) => p.pageId === pageId)?.elements.find((e) => e.elementId === elementId);
+    // Multiple-choice content is validated server-side; everything else is
+    // stored as free-form JSON.
+    if (el?.elementType === "multiple_choice") {
+      run(updateMultipleChoiceContentAction(moduleId, elementId, content));
+    } else {
+      run(updateElementContentAction(moduleId, elementId, content as never));
+    }
   }
 
   // --- lifecycle ---
@@ -611,7 +630,7 @@ function ElementView({
         )}
         {el.elementType === "multiple_choice" && (
           <MultipleChoiceElement
-            content={(el.content as MultipleChoiceContent | null) ?? { question: "", options: [], allowMultiple: false }}
+            content={(el.content as MultipleChoiceContent | null) ?? { stem: "", allow_multiple: false, options: [] }}
             editable={editable}
             onSave={onSaveContent}
           />
@@ -698,41 +717,38 @@ function MultipleChoiceElement({
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-muted-foreground">Options</span>
           <div className="flex items-center overflow-hidden rounded border border-border">
-            <button type="button" disabled={!editable || mc.options.length <= 2} className="bg-gray-50 px-1.5 py-0.5 text-xs disabled:opacity-40" onClick={() => commit({ ...mc, options: mc.options.slice(0, -1) })}><Minus size={11} /></button>
+            <button type="button" disabled={!editable || mc.options.length <= MC_MIN_OPTIONS} className="bg-gray-50 px-1.5 py-0.5 text-xs disabled:opacity-40" onClick={() => commit({ ...mc, options: mc.options.slice(0, -1) })}><Minus size={11} /></button>
             <span className="px-2 text-xs font-bold text-foreground">{mc.options.length}</span>
-            <button type="button" disabled={!editable || mc.options.length >= 8} className="bg-gray-50 px-1.5 py-0.5 text-xs disabled:opacity-40" onClick={() => commit({ ...mc, options: [...mc.options, { text: "", correct: false }] })}><Plus size={11} /></button>
+            <button type="button" disabled={!editable || mc.options.length >= MC_MAX_OPTIONS} className="bg-gray-50 px-1.5 py-0.5 text-xs disabled:opacity-40" onClick={() => commit({ ...mc, options: [...mc.options, { id: crypto.randomUUID(), label: "" }] })}><Plus size={11} /></button>
           </div>
         </div>
+        {/* Author toggle: checkboxes (allow multiple) vs radio buttons (single). */}
         <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
-          <input type="checkbox" checked={mc.allowMultiple} disabled={!editable} onChange={(e) => commit({ ...mc, allowMultiple: e.target.checked })} />
+          <input type="checkbox" checked={mc.allow_multiple} disabled={!editable} onChange={(e) => commit({ ...mc, allow_multiple: e.target.checked })} />
           Allow multiple answers
         </label>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-2">
         <input
           className="module-content mb-2 w-full rounded border border-input px-1.5 py-1 text-xs"
-          value={mc.question}
+          value={mc.stem}
           disabled={!editable}
-          placeholder="Question…"
-          onChange={(e) => setMc({ ...mc, question: e.target.value })}
+          placeholder="Question stem…"
+          onChange={(e) => setMc({ ...mc, stem: e.target.value })}
           onBlur={() => onSave(mc)}
         />
         <div className="flex flex-col gap-1">
           {mc.options.map((opt, i) => (
-            <div key={i} className="flex items-center gap-1.5">
-              <input
-                type="checkbox"
-                title="Mark as a correct answer"
-                checked={opt.correct}
-                disabled={!editable}
-                onChange={(e) => commit({ ...mc, options: mc.options.map((o, j) => (j === i ? { ...o, correct: e.target.checked } : o)) })}
-              />
+            <div key={opt.id} className="flex items-center gap-1.5">
+              {/* Format indicator only — checkbox or radio per the toggle. Not a
+                  correctness marker (scoring is the deferred Quiz sub-stage). */}
+              <input type={mc.allow_multiple ? "checkbox" : "radio"} disabled aria-hidden className="flex-shrink-0" />
               <input
                 className={inputCls}
-                value={opt.text}
+                value={opt.label}
                 disabled={!editable}
                 placeholder={`Option ${i + 1}`}
-                onChange={(e) => setMc({ ...mc, options: mc.options.map((o, j) => (j === i ? { ...o, text: e.target.value } : o)) })}
+                onChange={(e) => setMc({ ...mc, options: mc.options.map((o, j) => (j === i ? { ...o, label: e.target.value } : o)) })}
                 onBlur={() => onSave(mc)}
               />
             </div>

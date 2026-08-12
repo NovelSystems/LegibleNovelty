@@ -17,6 +17,8 @@ import {
   createElement,
   moveElement,
   updateElementContent,
+  parseMultipleChoiceContent,
+  defaultMultipleChoiceContent,
 } from "@/lib/module-authoring";
 import type { Prisma } from "@prisma/client";
 import type { ActionResult, ModuleElementType, AiAttestation } from "./types";
@@ -116,14 +118,7 @@ export async function deletePageAction(
 // --- elements ----------------------------------------------------------------
 
 const DEFAULT_TEXT_CONTENT = { type: "doc", content: [{ type: "paragraph" }] };
-const DEFAULT_MC_CONTENT = {
-  question: "",
-  options: [
-    { text: "", correct: false },
-    { text: "", correct: false },
-  ],
-  allowMultiple: false,
-};
+const DEFAULT_MC_CONTENT = defaultMultipleChoiceContent() as unknown as Prisma.InputJsonValue;
 // Default element size as PERCENT of the 4:3 canvas.
 const DEFAULT_SIZES: Record<ModuleElementType, { w: number; h: number }> = {
   text: { w: 84, h: 16 },
@@ -210,6 +205,28 @@ export async function updateElementContentAction(
     return { ok: true };
   } catch (e) {
     return fail(e, "Could not save the element.");
+  }
+}
+
+// Multiple-choice content goes through validation (stem present; option count
+// within [MIN_MC_OPTIONS, MAX_MC_OPTIONS]) before it is written — unlike the
+// free-form text/image content, which the generic action above stores as-is.
+export async function updateMultipleChoiceContentAction(
+  moduleId: string,
+  elementId: string,
+  content: unknown,
+): Promise<ActionResult> {
+  const accountId = await currentAccountId();
+  if (!accountId) return { ok: false, error: "You must be signed in." };
+  try {
+    await loadEditableModule(moduleId, accountId);
+    await assertElementInModule(elementId, moduleId);
+    const parsed = parseMultipleChoiceContent(content); // throws ModuleError if invalid
+    await updateElementContent(elementId, parsed as unknown as Prisma.InputJsonValue);
+    await touchModuleEdited(moduleId, accountId);
+    return { ok: true };
+  } catch (e) {
+    return fail(e, "Could not save the multiple-choice element.");
   }
 }
 
