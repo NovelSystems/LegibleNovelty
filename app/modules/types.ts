@@ -1,0 +1,49 @@
+// Shared types for the Module Editor surface (plain module — no directive — so
+// both the server actions and the client canvas can import it).
+
+export type ModuleElementType =
+  | "text"
+  | "image"
+  | "fillable_field"
+  | "multiple_choice";
+export type ModuleStatus =
+  | "draft"
+  | "pending_review"
+  | "moderation_hold"
+  | "published";
+export type AiAttestation =
+  | "wholly_human"
+  | "ai_assisted_manual_flair"
+  | "ai_pipeline";
+
+// Image element content shape (text content is TipTap JSON, kept as unknown).
+export interface ImageContent {
+  src: string;
+  alt: string;
+}
+
+// Multiple-choice content is canonically defined (and validated) in the backend
+// authoring lib; re-export the type so the UI shares one shape. Content/format
+// only — no correctness/scoring (that's the deferred Quiz sub-stage).
+export type { MCOption, MultipleChoiceContent } from "@/lib/module-authoring";
+
+export interface EditorElement {
+  elementId: string;
+  elementType: ModuleElementType;
+  positionX: number;
+  positionY: number;
+  width: number;
+  height: number;
+  zIndex: number;
+  content: unknown;
+}
+
+export interface EditorPage {
+  pageId: string;
+  pageOrder: number;
+  elements: EditorElement[];
+}
+
+export type ActionResult<T = object> =
+  | ({ ok: true } & T)
+  | { ok: false; error: string };

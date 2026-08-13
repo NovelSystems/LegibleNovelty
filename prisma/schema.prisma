@@ -928,6 +928,12 @@ enum ModuleElementType {
   text
   image
   fillable_field // Reserved; fillable fields normally nest inside text content.
+  // A self-contained positioned multiple-choice block. content JSON:
+  // { stem, allow_multiple, options: [{ id, label }] } (see
+  // lib/module-authoring.ts parseMultipleChoiceContent). Content/FORMAT only —
+  // it does NOT track correctness or scoring; that belongs to the deferred
+  // Quiz/Test/Scoring Library sub-stage.
+  multiple_choice
 }
 
 enum ModuleDecisionType {

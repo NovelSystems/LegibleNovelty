@@ -229,3 +229,30 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Module Editor (authoring canvas). Fillable-field chips render inside TipTap
+ * text content (which itself uses the Lora `.module-content` font); the chip
+ * label stays in the interface font so it reads as UI, not prose.
+ * ------------------------------------------------------------------------- */
+.fillable-field {
+  display: inline-block;
+  padding: 0 0.25rem;
+  border-radius: var(--radius-sm);
+  /* Gold chip (mockup v6): fill = gold-100, dashed border = gold-400, text =
+     gold-700 — all design tokens, not the mockup's raw hexes. */
+  background-color: var(--color-gold-100);
+  border: 1px dashed var(--color-gold-400);
+  color: var(--color-gold-700);
+  font-family: var(--font-sans);
+  font-size: 0.9em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* The editable TipTap surface for a text element. */
+.tiptap-area {
+  min-height: 8rem;
+  padding: 0.5rem 0.75rem;
+  outline: none;
+}
