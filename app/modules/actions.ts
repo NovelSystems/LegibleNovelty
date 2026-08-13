@@ -124,7 +124,7 @@ const DEFAULT_SIZES: Record<ModuleElementType, { w: number; h: number }> = {
   text: { w: 84, h: 16 },
   image: { w: 50, h: 40 },
   fillable_field: { w: 30, h: 8 },
-  multiple_choice: { w: 84, h: 62 },
+  multiple_choice: { w: 84, h: 70 },
 };
 
 export async function addElementAction(

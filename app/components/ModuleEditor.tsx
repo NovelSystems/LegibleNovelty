@@ -1,14 +1,12 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Type,
   Image as ImageIcon,
   FormInput,
   ListChecks,
-  BringToFront,
-  SendToBack,
   Trash2,
   Plus,
   Minus,
@@ -156,7 +154,7 @@ export function ModuleEditor({
                 }
               : { label: "Fill in" };
       const size =
-        type === "image" ? { w: 50, h: 40 } : type === "multiple_choice" ? { w: 84, h: 62 } : type === "fillable_field" ? { w: 30, h: 8 } : { w: 84, h: 16 };
+        type === "image" ? { w: 50, h: 40 } : type === "multiple_choice" ? { w: 84, h: 70 } : type === "fillable_field" ? { w: 30, h: 8 } : { w: 84, h: 16 };
       const el: EditorElement = {
         elementId: rr.elementId,
         elementType: type,
@@ -258,8 +256,8 @@ export function ModuleEditor({
             <ToolbarBtn title="Fillable field" onClick={onAddFillable}><FormInput size={16} /></ToolbarBtn>
             <ToolbarBtn title="Multiple choice" onClick={() => onAddElement("multiple_choice")}><ListChecks size={16} /></ToolbarBtn>
             <span className="mx-1 h-5 w-px bg-border" aria-hidden />
-            <ToolbarBtn title="Bring forward" tone="accent" disabled={!selected} onClick={() => onLayer("front")}><BringToFront size={16} /></ToolbarBtn>
-            <ToolbarBtn title="Send back" tone="accent" disabled={!selected} onClick={() => onLayer("back")}><SendToBack size={16} /></ToolbarBtn>
+            <ToolbarBtn title="Bring forward" tone="accent" disabled={!selected} onClick={() => onLayer("front")}><BringForwardIcon /></ToolbarBtn>
+            <ToolbarBtn title="Send back" tone="accent" disabled={!selected} onClick={() => onLayer("back")}><SendBackIcon /></ToolbarBtn>
             <ToolbarBtn title="Delete" tone="danger" disabled={!selected} onClick={onDeleteSelected}><Trash2 size={16} /></ToolbarBtn>
           </div>
         )}
@@ -379,6 +377,20 @@ function ToolbarBtn({
   tone?: "accent" | "danger";
   children: React.ReactNode;
 }) {
+  // Desktop: native hover tooltip via `title`. Touch: the tap fires onClick, and
+  // we flash the label for ~3s as a confirmation (no separate preview tap).
+  const [touchLabel, setTouchLabel] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  function onPointerDown(e: React.PointerEvent) {
+    if (e.pointerType === "touch" && !disabled) {
+      setTouchLabel(true);
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => setTouchLabel(false), 3000);
+    }
+  }
+
   const toneCls =
     tone === "danger"
       ? "border-danger-500 text-danger-text bg-danger-50"
@@ -386,16 +398,46 @@ function ToolbarBtn({
         ? "border-primary text-primary bg-teal-50"
         : "border-border text-foreground bg-white hover:bg-gray-50";
   return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      onClick={onClick}
-      disabled={disabled}
-      className={`grid h-8 w-8 place-items-center rounded-md border ${toneCls} disabled:cursor-not-allowed disabled:opacity-40`}
-    >
-      {children}
-    </button>
+    <span className="relative inline-flex">
+      <button
+        type="button"
+        title={title}
+        aria-label={title}
+        onClick={onClick}
+        onPointerDown={onPointerDown}
+        disabled={disabled}
+        className={`grid h-8 w-8 place-items-center rounded-md border ${toneCls} disabled:cursor-not-allowed disabled:opacity-40`}
+      >
+        {children}
+      </button>
+      <span
+        role="status"
+        className={`pointer-events-none absolute left-1/2 top-full z-30 mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-1.5 py-0.5 text-[10px] text-white transition-opacity duration-300 ${touchLabel ? "opacity-100" : "opacity-0"}`}
+      >
+        {title}
+      </span>
+    </span>
+  );
+}
+
+// Layer icons: two overlapping squares (~40% overlap), one shaded (solid) and
+// one outlined (white fill, colored border). SAME shapes/positions for both — only
+// the paint order differs. Bring-forward paints the shaded square last (it covers
+// the outlined one's corner); send-back paints the outlined square last.
+function BringForwardIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="2" y="2" width="9" height="9" rx="1" fill="#fff" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="5" y="5" width="9" height="9" rx="1" fill="currentColor" />
+    </svg>
+  );
+}
+function SendBackIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="5" y="5" width="9" height="9" rx="1" fill="currentColor" />
+      <rect x="2" y="2" width="9" height="9" rx="1" fill="#fff" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
   );
 }
 
@@ -728,9 +770,9 @@ function MultipleChoiceElement({
           Allow multiple answers
         </label>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-2">
+      <div className="min-h-0 flex-1 overflow-auto p-1.5">
         <input
-          className="module-content mb-2 w-full rounded border border-input px-1.5 py-1 text-xs"
+          className="module-content mb-1.5 w-full rounded border border-input px-1.5 py-1 text-xs"
           value={mc.stem}
           disabled={!editable}
           placeholder="Question stem…"
@@ -761,10 +803,13 @@ function MultipleChoiceElement({
 
 // --- submit modal (attestation) ---------------------------------------------
 
+// Display labels only — the backend ai_attestation enum values (wholly_human /
+// ai_assisted_manual_flair / ai_pipeline) are unchanged. This is a UI copy swap,
+// not a schema change.
 const ATTESTATIONS: { value: AiAttestation; label: string; hint: string }[] = [
-  { value: "wholly_human", label: "Wholly human", hint: "No AI used in authoring." },
-  { value: "ai_assisted_manual_flair", label: "AI-assisted, with manual flair", hint: "AI helped; a person shaped it." },
-  { value: "ai_pipeline", label: "AI pipeline", hint: "Generated by an AI pipeline. Locks once set." },
+  { value: "wholly_human", label: "Fully Human Authored", hint: "No AI used in authoring." },
+  { value: "ai_assisted_manual_flair", label: "AI-Assisted", hint: "AI helped; a person shaped the result." },
+  { value: "ai_pipeline", label: "Mostly AI-Generated", hint: "Generated largely by an AI pipeline." },
 ];
 
 function SubmitModal({
@@ -787,24 +832,32 @@ function SubmitModal({
           <button type="button" onClick={onCancel} aria-label="Close" className="text-muted-foreground hover:text-foreground"><X size={18} /></button>
         </div>
         <p className="mb-4 text-sm text-muted-foreground">
-          AI-assisted work is welcome here. This isn&apos;t a penalty — declaring human
-          authorship simply earns a discoverability boost in search.
+          An AI attestation is required before submission. AI-assisted work is
+          welcome here — this isn&apos;t a penalty; undeclared or human-only work
+          simply earns a discoverability boost in search.
         </p>
-        <div className="space-y-2">
-          {ATTESTATIONS.map((a) => (
-            <label key={a.value} className={`flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm ${value === a.value ? "border-primary bg-secondary" : "border-border"}`}>
-              <input type="radio" name="att" className="mt-1" checked={value === a.value} onChange={() => setValue(a.value)} />
-              <span>
-                <span className="font-medium text-foreground">{a.label}</span>
-                <span className="block text-xs text-muted-foreground">{a.hint}</span>
-              </span>
-            </label>
-          ))}
-        </div>
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium text-foreground">Attestation</span>
+          <select
+            value={value ?? ""}
+            onChange={(e) => setValue(e.target.value ? (e.target.value as AiAttestation) : null)}
+            className="w-full rounded-md border border-input bg-white px-3 py-2 text-base text-foreground focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/30"
+          >
+            <option value="" disabled>Select an attestation…</option>
+            {ATTESTATIONS.map((a) => (
+              <option key={a.value} value={a.value}>{a.label}</option>
+            ))}
+          </select>
+        </label>
+        {value && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            {ATTESTATIONS.find((a) => a.value === value)?.hint}
+          </p>
+        )}
         <div className="mt-5 flex justify-end gap-2">
           <button type="button" onClick={onCancel} className="rounded-md border border-border bg-white px-4 py-2 text-base text-foreground hover:bg-gray-50">Cancel</button>
           <button type="button" disabled={pending || value == null} onClick={() => value && onConfirm(value)} className="rounded-md bg-primary px-4 py-2 text-base font-bold text-primary-foreground hover:bg-primary-hover disabled:bg-primary-disabled">
-            {pending ? "Working…" : "Submit for review"}
+            {pending ? "Working…" : "Confirm and submit"}
           </button>
         </div>
       </div>
